@@ -55,6 +55,8 @@ it('subscribes a user to a package', function () {
 });
 
 it('subscribes with trial', function () {
+    $this->travelTo(now()->startOfDay());
+
     $subscription = app('tashil')->subscription()->subscribe($this->user, $this->package, withTrial: true);
 
     expect($subscription->status)->toBe(SubscriptionStatus::OnTrial);
