@@ -4,6 +4,9 @@ namespace Foysal50x\Tashil\Support\Query;
 
 use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Database\Grammar;
+use Illuminate\Database\Query\Grammars\PostgresGrammar;
+use Illuminate\Database\Query\Grammars\SQLiteGrammar;
+use Illuminate\Database\Query\Grammars\SqlServerGrammar;
 
 class DateFmt implements Expression
 {
@@ -15,13 +18,23 @@ class DateFmt implements Expression
     public function getValue(Grammar $grammar): string
     {
         $column = $grammar->wrap($this->column);
-        $driver = $grammar->getConnection()->getDriverName();
+        $driver = $this->resolveDriver($grammar);
 
         return match ($driver) {
             'sqlite' => "strftime('{$this->sqliteFormat()}', {$column})",
             'pgsql'  => "to_char({$column}, '{$this->postgresFormat()}')",
             'sqlsrv' => "format({$column}, '{$this->sqlsrvFormat()}')",
             default  => "date_format({$column}, '{$this->mysqlFormat()}')",
+        };
+    }
+
+    private function resolveDriver(Grammar $grammar): string
+    {
+        return match (true) {
+            $grammar instanceof SQLiteGrammar    => 'sqlite',
+            $grammar instanceof PostgresGrammar  => 'pgsql',
+            $grammar instanceof SqlServerGrammar => 'sqlsrv',
+            default                              => 'mysql',
         };
     }
 
