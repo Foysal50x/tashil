@@ -73,20 +73,30 @@ jobs:
           extensions: mbstring, pdo, pdo_sqlite, pdo_mysql, pdo_pgsql, redis
           coverage: none
 
-      - name: Determine Testbench version
-        id: testbench
+      - name: Determine dependency versions
+        id: versions
         run: |
           if [[ "${{ matrix.laravel }}" == "10.*" ]]; then
-            echo "version=^8.0" >> $GITHUB_OUTPUT
+            echo "testbench=^8.0" >> $GITHUB_OUTPUT
+            echo "collision=^7.0" >> $GITHUB_OUTPUT
+            echo "pest=^2.0" >> $GITHUB_OUTPUT
+            echo "pest_laravel=^2.0" >> $GITHUB_OUTPUT
           elif [[ "${{ matrix.laravel }}" == "11.*" ]]; then
-            echo "version=^9.0" >> $GITHUB_OUTPUT
+            echo "testbench=^9.0" >> $GITHUB_OUTPUT
+            echo "collision=^8.0" >> $GITHUB_OUTPUT
+            echo "pest=^3.0" >> $GITHUB_OUTPUT
+            echo "pest_laravel=^3.0" >> $GITHUB_OUTPUT
           elif [[ "${{ matrix.laravel }}" == "12.*" ]]; then
-            echo "version=^10.0" >> $GITHUB_OUTPUT
+            echo "testbench=^10.0" >> $GITHUB_OUTPUT
+            echo "collision=^8.0" >> $GITHUB_OUTPUT
+            echo "pest=^3.0" >> $GITHUB_OUTPUT
+            echo "pest_laravel=^3.0" >> $GITHUB_OUTPUT
           fi
 
       - name: Install dependencies
         run: |
-          composer require "illuminate/support:${{ matrix.laravel }}" "illuminate/database:${{ matrix.laravel }}" "illuminate/redis:${{ matrix.laravel }}" "orchestra/testbench:${{ steps.testbench.outputs.version }}" --no-interaction --no-update
+          composer require "illuminate/support:${{ matrix.laravel }}" "illuminate/database:${{ matrix.laravel }}" "illuminate/redis:${{ matrix.laravel }}" --no-interaction --no-update
+          composer require --dev "orchestra/testbench:${{ steps.versions.outputs.testbench }}" "nunomaduro/collision:${{ steps.versions.outputs.collision }}" "pestphp/pest:${{ steps.versions.outputs.pest }}" "pestphp/pest-plugin-laravel:${{ steps.versions.outputs.pest_laravel }}" --no-interaction --no-update
           composer update --prefer-dist --no-interaction --no-progress
 
       - name: Set database environment (SQLite)
