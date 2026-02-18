@@ -1,0 +1,48 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: tashil_mysql
+    ports:
+      - "13306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: tashil
+      MYSQL_DATABASE: tashil_test
+    volumes:
+      - tashil_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ptashil"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgsql:
+    image: postgres:16
+    container_name: tashil_pgsql
+    ports:
+      - "15432:5432"
+    environment:
+      POSTGRES_USER: tashil
+      POSTGRES_PASSWORD: tashil
+      POSTGRES_DB: tashil_test
+    volumes:
+      - tashil_pgsql_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tashil"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: tashil_redis
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  tashil_mysql_data:
+  tashil_pgsql_data:

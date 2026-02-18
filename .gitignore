@@ -1,0 +1,19 @@
+/vendor/
+/coverage/
+/phpunit.xml
+/build
+/.phpunit.cache/
+/.php-cs-fixer.cache
+/composer.lock
+*.phar
+coverage.xml
+.phpunit.result.cache
+
+# Mac DS_Store
+.DS_Store
+
+# IntelliJ
+.idea
+
+# VSCode
+.vscode

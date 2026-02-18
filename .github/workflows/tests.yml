@@ -1,0 +1,123 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+        laravel: ['10.*', '11.*', '12.*']
+        db: [sqlite, mysql, pgsql]
+        exclude:
+          # Laravel 12 requires PHP 8.2+ (all included)
+          # Laravel 10 doesn't support PHP 8.4
+          - php: '8.4'
+            laravel: '10.*'
+
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / ${{ matrix.db }}
+
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: tashil
+          MYSQL_DATABASE: tashil_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tashil
+          POSTGRES_PASSWORD: tashil
+          POSTGRES_DB: tashil_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo, pdo_sqlite, pdo_mysql, pdo_pgsql, redis
+          coverage: none
+
+      - name: Determine Testbench version
+        id: testbench
+        run: |
+          if [[ "${{ matrix.laravel }}" == "10.*" ]]; then
+            echo "version=^8.0" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.laravel }}" == "11.*" ]]; then
+            echo "version=^9.0" >> $GITHUB_OUTPUT
+          elif [[ "${{ matrix.laravel }}" == "12.*" ]]; then
+            echo "version=^10.0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install dependencies
+        run: |
+          composer require "illuminate/support:${{ matrix.laravel }}" "illuminate/database:${{ matrix.laravel }}" "illuminate/redis:${{ matrix.laravel }}" "orchestra/testbench:${{ steps.testbench.outputs.version }}" --no-interaction --no-update
+          composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Set database environment (SQLite)
+        if: matrix.db == 'sqlite'
+        run: |
+          echo "DB_CONNECTION=testing" >> $GITHUB_ENV
+          echo "DB_DATABASE=:memory:" >> $GITHUB_ENV
+
+      - name: Set database environment (MySQL)
+        if: matrix.db == 'mysql'
+        run: |
+          echo "DB_CONNECTION=mysql" >> $GITHUB_ENV
+          echo "MYSQL_HOST=127.0.0.1" >> $GITHUB_ENV
+          echo "MYSQL_PORT=3306" >> $GITHUB_ENV
+          echo "MYSQL_DATABASE=tashil_test" >> $GITHUB_ENV
+          echo "MYSQL_USERNAME=root" >> $GITHUB_ENV
+          echo "MYSQL_PASSWORD=tashil" >> $GITHUB_ENV
+
+      - name: Set database environment (PostgreSQL)
+        if: matrix.db == 'pgsql'
+        run: |
+          echo "DB_CONNECTION=pgsql" >> $GITHUB_ENV
+          echo "PGSQL_HOST=127.0.0.1" >> $GITHUB_ENV
+          echo "PGSQL_PORT=5432" >> $GITHUB_ENV
+          echo "PGSQL_DATABASE=tashil_test" >> $GITHUB_ENV
+          echo "PGSQL_USERNAME=tashil" >> $GITHUB_ENV
+          echo "PGSQL_PASSWORD=tashil" >> $GITHUB_ENV
+
+      - name: Run tests
+        env:
+          TASHIL_REDIS_HOST: 127.0.0.1
+          TASHIL_REDIS_PORT: 6379
+          TASHIL_REDIS_DB: 5
+        run: vendor/bin/pest --no-coverage
