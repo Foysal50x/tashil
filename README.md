@@ -9,7 +9,6 @@
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Quick Start](#quick-start)
-- [Features & Packages](#features--packages)
 - [Subscriptions](#subscriptions)
 - [Usage Tracking](#usage-tracking)
 - [Billing & Invoices](#billing--invoices)
@@ -19,7 +18,6 @@
 - [Events](#events)
 - [Caching Architecture](#caching-architecture)
 - [API Reference](#api-reference)
-- [Configuration Reference](#configuration-reference)
 - [Examples](#examples)
 
 ---
@@ -512,9 +510,6 @@ The `AnalyticsService` provides comprehensive subscription, revenue, and usage a
 $analytics = Tashil::analytics();
 ```
 
-> [!TIP]
-> **Performance**: `dashboardSummary()` uses batch queries (2 DB queries total instead of ~10). `churnTrend()` uses 2 bulk queries instead of 2×N. All queries use [`tpetry/laravel-query-expressions`](https://github.com/tpetry/laravel-query-expressions) for cross-database compatibility (MySQL, PostgreSQL, SQLite).
-
 ### Subscription Metrics
 
 ```php
@@ -837,19 +832,6 @@ Tashil::package($slug)   // → PackageBuilder
 | `calculateMRR()` | `float` | Monthly Recurring Revenue |
 | `churnRate(int $days)` | `float` | Churn percentage |
 | `trialConversionRate()` | `float` | Trial conversion percentage |
-
----
-
-## Examples
-
-For more detailed examples and usage scenarios, check the [examples/](examples/) directory:
-
-- [Subscription Management](examples/01-Subscription-Management.md)
-- [Feature Usage Tracking](examples/02-Feature-Usage-Tracking.md)
-- [Billing and Invoicing](examples/03-Billing-and-Invoicing.md)
-- [Analytics](examples/04-Analytics.md)
-- [Console Commands](examples/05-Console-Commands.md)
-|--------|--------|-------------|
 | `totalSubscriptionCount()` | `int` | All subscriptions |
 | `activeSubscriptionCount()` | `int` | Active + on-trial |
 | `subscriptionCountByStatus()` | `array` | Count per status |
@@ -963,45 +945,7 @@ For more detailed examples and usage scenarios, check the [examples/](examples/)
 | `remainingUsage()` | `float` | Value minus usage |
 | `usagePercentage()` | `float` | Usage as % of value |
 
-### Enums
-
-#### SubscriptionStatus
-
-`Pending` · `Active` · `OnTrial` · `PastDue` · `Cancelled` · `Expired` · `Suspended`
-
-#### FeatureType
-
-`Boolean` · `Limit` · `Consumable` · `Enum`
-
-#### Period
-
-`Day` · `Week` · `Month` · `Year` · `Lifetime`
-
-#### InvoiceStatus
-
-`Draft` · `Pending` · `Paid` · `Void` · `Refunded`
-
-#### TransactionStatus
-
-`Pending` · `Success` · `Failed` · `Refunded`
-
 ---
-
-## Configuration Reference
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `tashil.database.connection` | `null` | Database connection name |
-| `tashil.database.prefix` | `tashil_` | Table prefix |
-| `tashil.database.tables.*` | See config | Customisable table names |
-| `tashil.currency` | `USD` | Default currency (ISO 4217) |
-| `tashil.redis.host` | `127.0.0.1` | Redis host |
-| `tashil.redis.password` | `null` | Redis password |
-| `tashil.redis.port` | `6379` | Redis port |
-| `tashil.redis.database` | `5` | Redis database index |
-| `tashil.cache.prefix` | `tashil_cache:` | Cache key prefix |
-| `tashil.cache.ttl` | `3600` | Cache TTL in seconds |
-| `tashil.cache.enabled` | `true` | Enable/disable caching globally |
 
 ### Environment Variables
 
@@ -1036,6 +980,16 @@ tashil_transactions
 The `subscriptions` table uses a polymorphic `subscriber_type` / `subscriber_id` pattern, so any Eloquent model can be a subscriber.
 
 ---
+
+## Examples
+
+For more detailed examples and usage scenarios, check the [examples/](examples/) directory:
+
+- [Subscription Management](examples/01-Subscription-Management.md)
+- [Feature Usage Tracking](examples/02-Feature-Usage-Tracking.md)
+- [Billing and Invoicing](examples/03-Billing-and-Invoicing.md)
+- [Analytics](examples/04-Analytics.md)
+- [Console Commands](examples/05-Console-Commands.md)
 
 ## License
 
