@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+
+    <php>
+        <!-- Default: SQLite in-memory -->
+        <env name="DB_CONNECTION" value="testing"/>
+        <env name="DB_DATABASE" value=":memory:"/>
+
+        <!-- MySQL (used when DB_CONNECTION=mysql) -->
+        <env name="MYSQL_HOST" value="127.0.0.1"/>
+        <env name="MYSQL_PORT" value="13306"/>
+        <env name="MYSQL_DATABASE" value="tashil_test"/>
+        <env name="MYSQL_USERNAME" value="root"/>
+        <env name="MYSQL_PASSWORD" value="tashil"/>
+
+        <!-- PostgreSQL (used when DB_CONNECTION=pgsql) -->
+        <env name="PGSQL_HOST" value="127.0.0.1"/>
+        <env name="PGSQL_PORT" value="15432"/>
+        <env name="PGSQL_DATABASE" value="tashil_test"/>
+        <env name="PGSQL_USERNAME" value="tashil"/>
+        <env name="PGSQL_PASSWORD" value="tashil"/>
+
+        <!-- Cache: Redis -->
+        <env name="CACHE_DRIVER" value="redis"/>
+        <env name="REDIS_HOST" value="127.0.0.1"/>
+        <env name="REDIS_PASSWORD" value="null"/>
+        <env name="REDIS_PORT" value="6379"/>
+    </php>
+</phpunit>
