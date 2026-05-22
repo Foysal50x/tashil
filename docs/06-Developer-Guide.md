@@ -9,7 +9,7 @@ How tahsil is laid out, how to extend it, and how to integrate it with a host ap
 | 10.x | 8.2 / 8.3 | ^8.0 | ^2.0 | ^7.0 |
 | 11.x | 8.2 / 8.3 / 8.4 | ^9.0 | ^3.0 | ^8.0 |
 | 12.x | 8.2 / 8.3 / 8.4 / 8.5 | ^10.0 | ^3.0 | ^8.0 |
-| 13.x | 8.3 / 8.4 / 8.5 | ^11.0 | ^4.0 | ^9.0 |
+| 13.x | 8.3 / 8.4 / 8.5 | ^11.0 | ^4.0 | ^8.0 |
 
 Laravel 13 was released March 17, 2026 and requires PHP 8.3+. Tahsil's CI matrix tests every supported (Laravel × PHP × DB) combination — SQLite, MySQL 8, and PostgreSQL 16.
 
