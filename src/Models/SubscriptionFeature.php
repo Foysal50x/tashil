@@ -42,6 +42,7 @@ class SubscriptionFeature extends BaseModel
                             'SubscriptionFeature.superseded_at is one-way; cannot rewrite once set.',
                         );
                     }
+
                     continue;
                 }
 
