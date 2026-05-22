@@ -30,13 +30,24 @@ class SubscriptionFeature extends BaseModel
     protected static function booted(): void
     {
         static::updating(function (self $model): void {
-            $allowed = ['superseded_at', 'updated_at'];
             foreach ($model->getDirty() as $column => $_value) {
-                if (! in_array($column, $allowed, true)) {
-                    throw new RuntimeException(
-                        "SubscriptionFeature snapshot is immutable; cannot change '{$column}'.",
-                    );
+                if ($column === 'updated_at') {
+                    continue;
                 }
+
+                if ($column === 'superseded_at') {
+                    // One-way transition: null → timestamp. Once set, frozen.
+                    if ($model->getOriginal('superseded_at') !== null) {
+                        throw new RuntimeException(
+                            'SubscriptionFeature.superseded_at is one-way; cannot rewrite once set.',
+                        );
+                    }
+                    continue;
+                }
+
+                throw new RuntimeException(
+                    "SubscriptionFeature snapshot is immutable; cannot change '{$column}'.",
+                );
             }
         });
 

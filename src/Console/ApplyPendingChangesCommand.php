@@ -29,14 +29,17 @@ class ApplyPendingChangesCommand extends Command
 
         $this->info("Applying {$due->count()} pending change(s) for {$moment->toDateTimeString()}");
 
+        $hadFailures = false;
+
         foreach ($due as $subscription) {
             try {
                 $this->subscriptionService->applyPendingChange($subscription);
             } catch (\Throwable $e) {
+                $hadFailures = true;
                 Log::error("tashil:apply-pending-changes failed for {$subscription->id}: " . $e->getMessage());
             }
         }
 
-        return Command::SUCCESS;
+        return $hadFailures ? Command::FAILURE : Command::SUCCESS;
     }
 }

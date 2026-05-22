@@ -25,6 +25,8 @@ class RenewSubscriptionsCommand extends Command
         parent::__construct();
     }
 
+    private const ALLOWED_PENDING_INVOICE_POLICIES = ['cancel', 'skip', 'extend_grace'];
+
     public function handle(): int
     {
         $moment = $this->option('date')
@@ -33,19 +35,28 @@ class RenewSubscriptionsCommand extends Command
 
         $policy = Config::get('tashil.renewal.on_pending_invoice', 'cancel');
 
+        if (! in_array($policy, self::ALLOWED_PENDING_INVOICE_POLICIES, true)) {
+            $this->error("Invalid tashil.renewal.on_pending_invoice value '{$policy}'. Allowed: " . implode(', ', self::ALLOWED_PENDING_INVOICE_POLICIES));
+
+            return Command::FAILURE;
+        }
+
         $due = $this->subscriptionRepo->dueForRenewal($moment);
 
         $this->info("Renewing {$due->count()} subscription(s) for {$moment->toDateTimeString()} (on_pending_invoice={$policy})");
+
+        $hadFailures = false;
 
         foreach ($due as $subscription) {
             try {
                 $this->renewOne($subscription, $policy);
             } catch (\Throwable $e) {
+                $hadFailures = true;
                 Log::error("tashil:renew-subscriptions failed for {$subscription->id}: " . $e->getMessage());
             }
         }
 
-        return Command::SUCCESS;
+        return $hadFailures ? Command::FAILURE : Command::SUCCESS;
     }
 
     protected function renewOne(Subscription $subscription, string $policy): void
@@ -56,7 +67,7 @@ class RenewSubscriptionsCommand extends Command
             match ($policy) {
                 'skip'         => Log::info("Skipping renewal for {$subscription->id}: pending invoice exists"),
                 'extend_grace' => $this->extendGrace($subscription),
-                default        => $this->subscriptionService->cancel(
+                'cancel'       => $this->subscriptionService->cancel(
                     $subscription,
                     immediate: false,
                     reason: 'Auto-renewal failed: pending invoice exists',

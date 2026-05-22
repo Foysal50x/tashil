@@ -33,6 +33,8 @@ class MarkTrialsEndingCommand extends Command
 
         $this->info("Notifying {$due->count()} ending trial(s) (warn_days={$warnDays})");
 
+        $hadFailures = false;
+
         foreach ($due as $subscription) {
             try {
                 $daysRemaining = $now->diffInDays($subscription->trial_ends_at, false);
@@ -51,10 +53,11 @@ class MarkTrialsEndingCommand extends Command
                     TrialEnding::dispatch($subscription, $daysRemaining);
                 }
             } catch (\Throwable $e) {
+                $hadFailures = true;
                 Log::error("tashil:mark-trials-ending failed for {$subscription->id}: " . $e->getMessage());
             }
         }
 
-        return Command::SUCCESS;
+        return $hadFailures ? Command::FAILURE : Command::SUCCESS;
     }
 }

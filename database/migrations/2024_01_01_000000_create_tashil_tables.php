@@ -90,7 +90,10 @@ return new class extends Migration
             $table->foreignId('package_id')->constrained($packagesTable);
 
             // Scheduled-downgrade target (null when no change queued)
-            $table->unsignedBigInteger('pending_package_id')->nullable();
+            $table->foreignId('pending_package_id')
+                ->nullable()
+                ->constrained($packagesTable)
+                ->nullOnDelete();
             $table->timestamp('pending_change_at')->nullable();
 
             $table->string('status')->default('pending');
@@ -197,7 +200,7 @@ return new class extends Migration
             $table->unsignedBigInteger('sequence_num');
             $table->json('payload')->nullable();
             $table->json('metadata')->nullable();
-            $table->uuid('idempotency_key')->nullable();
+            $table->string('idempotency_key', 191)->nullable();
             $table->timestamp('occurred_at');
             $table->timestamp('recorded_at');
 

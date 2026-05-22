@@ -31,14 +31,17 @@ class ExpireTrialsCommand extends Command
 
         $this->info("Expiring {$due->count()} trial(s) for {$moment->toDateTimeString()}");
 
+        $hadFailures = false;
+
         foreach ($due as $subscription) {
             try {
                 $this->subscriptionService->expireTrial($subscription);
             } catch (\Throwable $e) {
+                $hadFailures = true;
                 Log::error("tashil:expire-trials failed for {$subscription->id}: " . $e->getMessage());
             }
         }
 
-        return Command::SUCCESS;
+        return $hadFailures ? Command::FAILURE : Command::SUCCESS;
     }
 }

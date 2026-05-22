@@ -38,19 +38,22 @@ class EventStore
         $connection = $this->db->connection();
 
         return $connection->transaction(function () use ($connection, $subscription, $eventType, $payload, $idempotencyKey, $metadata, $occurredAt) {
-            if ($idempotencyKey !== null) {
-                $existing = $this->events->findByIdempotencyKey($subscription->id, $idempotencyKey);
-                if ($existing) {
-                    return $existing;
-                }
-            }
-
             // Lock the subscription row so concurrent appenders serialize
             // and assign monotonically increasing sequence_num values.
             $locked = $connection->table($subscription->getTable())
                 ->where('id', $subscription->id)
                 ->lockForUpdate()
                 ->first(['id', 'last_event_seq']);
+
+            // Idempotency check runs under the lock so concurrent appenders
+            // with the same key observe the existing row instead of racing
+            // past the pre-check and tripping the unique constraint.
+            if ($idempotencyKey !== null) {
+                $existing = $this->events->findByIdempotencyKey($subscription->id, $idempotencyKey);
+                if ($existing) {
+                    return $existing;
+                }
+            }
 
             $nextSeq = ((int) ($locked->last_event_seq ?? 0)) + 1;
 

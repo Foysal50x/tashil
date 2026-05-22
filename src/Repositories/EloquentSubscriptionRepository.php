@@ -78,7 +78,8 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
         return $subscriber->morphMany(Subscription::class, 'subscriber')
             ->where('status', SubscriptionStatus::PendingCancellation)
             ->where(function ($q) {
-                $q->whereNull('ends_at')->orWhere('ends_at', '>', now());
+                $q->whereNull('cancellation_effective_at')
+                    ->orWhere('cancellation_effective_at', '>', now());
             })
             ->latest()
             ->first();
