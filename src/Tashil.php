@@ -6,6 +6,7 @@ use Foysal50x\Tashil\Builders\FeatureBuilder;
 use Foysal50x\Tashil\Builders\PackageBuilder;
 use Foysal50x\Tashil\Services\AnalyticsService;
 use Foysal50x\Tashil\Services\BillingService;
+use Foysal50x\Tashil\Services\EventStore;
 use Foysal50x\Tashil\Services\SubscriptionService;
 use Foysal50x\Tashil\Services\UsageService;
 
@@ -15,7 +16,8 @@ class Tashil
         protected SubscriptionService $subscriptionService,
         protected UsageService $usageService,
         protected AnalyticsService $analyticsService,
-        protected BillingService $billingService
+        protected BillingService $billingService,
+        protected EventStore $eventStore,
     ) {}
 
     // ── Service accessors ───────────────────────────────────────
@@ -38,6 +40,11 @@ class Tashil
     public function billing(): BillingService
     {
         return $this->billingService;
+    }
+
+    public function events(): EventStore
+    {
+        return $this->eventStore;
     }
 
     // ── Builder accessors ───────────────────────────────────────

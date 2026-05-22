@@ -3,8 +3,8 @@
 namespace Foysal50x\Tashil\Repositories;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
-use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
+use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Support\Query\DateFmt;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Config;
@@ -61,7 +61,7 @@ class EloquentInvoiceRepository implements InvoiceRepositoryInterface
             ->where('paid_at', '>=', $since)
             ->select(
                 new Alias(new DateFmt('paid_at', 'Y-m'), 'month'),
-                new Alias(new Sum('amount'), 'revenue')
+                new Alias(new Sum('amount'), 'revenue'),
             )
             ->groupBy('month')
             ->orderBy('month')
@@ -72,36 +72,36 @@ class EloquentInvoiceRepository implements InvoiceRepositoryInterface
 
     public function dashboardStats(): array
     {
-        $paid    = new Value(InvoiceStatus::Paid->value);
+        $paid = new Value(InvoiceStatus::Paid->value);
         $pending = new Value(InvoiceStatus::Pending->value);
 
         $row = Invoice::query()
             ->select([
                 new Alias(
                     new Coalesce([new SumFilter('amount', new Equal('status', $paid)), new Value(0)]),
-                    'total_revenue'
+                    'total_revenue',
                 ),
                 new Alias(
                     new CountFilter(new Equal('status', $pending)),
-                    'pending_count'
+                    'pending_count',
                 ),
                 new Alias(
                     new CountFilter(new CondAnd(
                         new Equal('status', $pending),
                         new CondAnd(
                             new NotIsNull('due_date'),
-                            new LessThan('due_date', new Now)
-                        )
+                            new LessThan('due_date', new Now),
+                        ),
                     )),
-                    'overdue_count'
+                    'overdue_count',
                 ),
             ])
             ->first();
 
         return [
-            'total_revenue'  => round((float) $row->total_revenue, 2),
-            'pending_count'  => (int) $row->pending_count,
-            'overdue_count'  => (int) $row->overdue_count,
+            'total_revenue' => round((float) $row->total_revenue, 2),
+            'pending_count' => (int) $row->pending_count,
+            'overdue_count' => (int) $row->overdue_count,
         ];
     }
 
@@ -121,17 +121,17 @@ class EloquentInvoiceRepository implements InvoiceRepositoryInterface
                 "{$packagesTable}.id as package_id",
                 new Alias(
                     new CountFilter(new Equal("{$invoicesTable}.status", $pending)),
-                    'pending_count'
+                    'pending_count',
                 ),
                 new Alias(
                     new CountFilter(new CondAnd(
                         new Equal("{$invoicesTable}.status", $pending),
                         new CondAnd(
                             new NotIsNull("{$invoicesTable}.due_date"),
-                            new LessThan("{$invoicesTable}.due_date", new Now)
-                        )
+                            new LessThan("{$invoicesTable}.due_date", new Now),
+                        ),
                     )),
-                    'overdue_count'
+                    'overdue_count',
                 ),
             ])
             ->groupBy("{$packagesTable}.id")

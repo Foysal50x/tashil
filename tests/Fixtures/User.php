@@ -13,6 +13,8 @@ class User extends Model
     use HasSubscriptions;
 
     protected $table = 'users';
+
     protected $guarded = [];
+
     public $timestamps = false;
 }

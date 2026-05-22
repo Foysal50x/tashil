@@ -23,13 +23,13 @@ beforeEach(function () {
         'issued_at'       => now(),
     ]);
     $this->transaction = Transaction::create([
-        'invoice_id'             => $this->invoice->id,
-        'amount'                 => 29.99,
-        'currency'               => 'USD',
-        'gateway'                => 'stripe',
-        'transaction_id'         => 'txn_123abc',
-        'status'                 => 'success',
-        'metadata'               => ['card_last4' => '4242'],
+        'invoice_id'     => $this->invoice->id,
+        'amount'         => 29.99,
+        'currency'       => 'USD',
+        'gateway'        => 'stripe',
+        'transaction_id' => 'txn_123abc',
+        'status'         => 'success',
+        'metadata'       => ['card_last4' => '4242'],
     ]);
 });
 

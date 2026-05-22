@@ -13,15 +13,19 @@ class SubscriptionFactory extends Factory
 
     public function definition(): array
     {
+        $start = now();
+
         return [
-            'subscriber_type' => 'App\\Models\\User',
-            'subscriber_id'   => $this->faker->randomNumber(),
-            'package_id'      => Package::factory(),
-            'status'          => SubscriptionStatus::Active,
-            'starts_at'       => now(),
-            'ends_at'         => now()->addMonth(),
-            'trial_ends_at'   => null,
-            'auto_renew'      => true,
+            'subscriber_type'      => 'App\\Models\\User',
+            'subscriber_id'        => $this->faker->randomNumber(),
+            'package_id'           => Package::factory(),
+            'status'               => SubscriptionStatus::Active,
+            'starts_at'            => $start,
+            'ends_at'              => $start->copy()->addMonth(),
+            'current_period_start' => $start,
+            'current_period_end'   => $start->copy()->addMonth(),
+            'trial_ends_at'        => null,
+            'auto_renew'           => true,
         ];
     }
 }

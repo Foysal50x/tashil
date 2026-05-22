@@ -12,7 +12,7 @@ class DateFmt implements Expression
 {
     public function __construct(
         private readonly string|Expression $column,
-        private readonly string $format = 'Y-m'
+        private readonly string $format = 'Y-m',
     ) {}
 
     public function getValue(Grammar $grammar): string

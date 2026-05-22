@@ -2,6 +2,7 @@
 
 namespace Foysal50x\Tashil\Models;
 
+use Foysal50x\Tashil\Database\Factories\InvoiceFactory;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,7 +16,7 @@ class Invoice extends BaseModel
 
     protected static function newFactory()
     {
-        return \Foysal50x\Tashil\Database\Factories\InvoiceFactory::new();
+        return InvoiceFactory::new();
     }
 
     protected $guarded = [];

@@ -11,17 +11,29 @@ use Illuminate\Support\Facades\Config;
 class PackageBuilder
 {
     protected string $slug;
+
     protected string $name;
+
     protected ?string $description = null;
+
     protected float $price = 0.00;
+
     protected ?float $originalPrice = null;
+
     protected string $currency;
+
     protected Period $billingPeriod = Period::Month;
+
     protected int $billingInterval = 1;
+
     protected int $trialDays = 0;
+
     protected bool $isActive = true;
+
     protected bool $isFeatured = false;
+
     protected int $sortOrder = 0;
+
     protected ?array $metadata = null;
 
     /**
@@ -148,15 +160,13 @@ class PackageBuilder
      * Attach a single feature to this package.
      *
      * @param  Feature|int  $feature  Feature model or ID
-     * @param  string|null  $value    Default value for this feature in this package
-     * @param  bool         $isAvailable
-     * @param  int          $sortOrder
+     * @param  string|null  $value  Default value for this feature in this package
      */
     public function feature(
         Feature|int $feature,
         ?string $value = null,
         bool $isAvailable = true,
-        int $sortOrder = 0
+        int $sortOrder = 0,
     ): self {
         $this->featureAttachments[] = [
             'feature'      => $feature,
@@ -218,7 +228,7 @@ class PackageBuilder
     {
         $package = $this->repo()->updateOrCreate(
             ['slug' => $this->slug],
-            $this->toArray()
+            $this->toArray(),
         );
 
         $this->attachFeatures($package);

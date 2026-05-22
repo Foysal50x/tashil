@@ -67,6 +67,6 @@ it('uses default connection name', function () {
         ->with('tashil')
         ->andReturn($this->connection);
 
-    $manager = new RedisManager();
+    $manager = new RedisManager;
     expect($manager->connection())->toBe($this->connection);
 });

@@ -1,6 +1,7 @@
 <?php
 
 use Foysal50x\Tashil\Support\Query\DateFmt;
+use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Support\Facades\DB;
 
 /*
@@ -67,5 +68,5 @@ it('uses default Y-m format when none specified', function () {
 it('implements Expression interface', function () {
     $expr = new DateFmt('created_at');
 
-    expect($expr)->toBeInstanceOf(\Illuminate\Contracts\Database\Query\Expression::class);
+    expect($expr)->toBeInstanceOf(Expression::class);
 });

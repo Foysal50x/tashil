@@ -3,7 +3,7 @@
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\QueryException;
 
 /**
  * Multi-database test.
@@ -21,7 +21,6 @@ use Illuminate\Support\Facades\Schema;
  *   DB_CONNECTION=mysql vendor/bin/pest tests/Feature/MultiDatabaseTest.php
  *   DB_CONNECTION=pgsql vendor/bin/pest tests/Feature/MultiDatabaseTest.php
  */
-
 it('creates and retrieves packages', function () {
     $package = Package::create([
         'name'             => 'Test Plan',
@@ -37,8 +36,8 @@ it('creates and retrieves packages', function () {
 
 it('creates features with pivot relationships', function () {
     $package = Package::create([
-        'name' => 'Pro',
-        'slug' => 'pro-test',
+        'name'  => 'Pro',
+        'slug'  => 'pro-test',
         'price' => 29.99,
     ]);
 
@@ -81,8 +80,8 @@ it('creates subscriptions with morphs', function () {
 
 it('handles soft deletes correctly', function () {
     $package = Package::create([
-        'name' => 'Soft Delete Test',
-        'slug' => 'soft-delete-test',
+        'name'  => 'Soft Delete Test',
+        'slug'  => 'soft-delete-test',
         'price' => 9.99,
     ]);
 
@@ -99,7 +98,7 @@ it('enforces unique constraints', function () {
     Package::create(['name' => 'Unique', 'slug' => 'unique-slug', 'price' => 9.99]);
 
     expect(fn () => Package::create(['name' => 'Duplicate', 'slug' => 'unique-slug', 'price' => 19.99]))
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });
 
 it('queries with scopes across drivers', function () {

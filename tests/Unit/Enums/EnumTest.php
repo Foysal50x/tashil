@@ -36,11 +36,13 @@ it('has correct Period cases', function () {
 // ── SubscriptionStatus ──────────────────────────────────────────
 
 it('has correct SubscriptionStatus cases', function () {
-    expect(SubscriptionStatus::cases())->toHaveCount(7);
+    expect(SubscriptionStatus::cases())->toHaveCount(9);
     expect(SubscriptionStatus::Pending->value)->toBe('pending');
     expect(SubscriptionStatus::Active->value)->toBe('active');
     expect(SubscriptionStatus::OnTrial->value)->toBe('on_trial');
     expect(SubscriptionStatus::PastDue->value)->toBe('past_due');
+    expect(SubscriptionStatus::Paused->value)->toBe('paused');
+    expect(SubscriptionStatus::PendingCancellation->value)->toBe('pending_cancellation');
     expect(SubscriptionStatus::Cancelled->value)->toBe('cancelled');
     expect(SubscriptionStatus::Expired->value)->toBe('expired');
     expect(SubscriptionStatus::Suspended->value)->toBe('suspended');

@@ -1,5 +1,6 @@
 <?php
 
+use Foysal50x\Tashil\Tests\Fixtures\User;
 use Foysal50x\Tashil\Tests\TestCase;
 
 /*
@@ -29,9 +30,9 @@ expect()->extend('toBeOne', function () {
 /**
  * Create a test User model for subscription testing.
  */
-function createUser(array $attributes = []): \Foysal50x\Tashil\Tests\Fixtures\User
+function createUser(array $attributes = []): User
 {
-    return \Foysal50x\Tashil\Tests\Fixtures\User::create(array_merge([
+    return User::create(array_merge([
         'name'  => 'Test User',
         'email' => 'test-' . uniqid() . '@example.com',
     ], $attributes));

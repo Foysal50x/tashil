@@ -66,8 +66,8 @@ it('scopes ordered by sort_order', function () {
 
 it('has inverse packages relationship', function () {
     $package = Package::create([
-        'name' => 'Pro',
-        'slug' => 'pro',
+        'name'  => 'Pro',
+        'slug'  => 'pro',
         'price' => 29.99,
     ]);
 

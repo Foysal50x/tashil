@@ -48,7 +48,7 @@ class AnalyticsService
     /**
      * Subscription count grouped by status.
      *
-     * @return array<string, int>  e.g. ['active' => 120, 'on_trial' => 30, ...]
+     * @return array<string, int> e.g. ['active' => 120, 'on_trial' => 30, ...]
      */
     public function subscriptionCountByStatus(): array
     {
@@ -214,10 +214,10 @@ class AnalyticsService
         $invStats = $this->invoiceRepo->dashboardStats();
 
         $active = $subStats['active'];
-        $arpu   = $active > 0 ? round($subStats['mrr'] / $active, 2) : 0.0;
+        $arpu = $active > 0 ? round($subStats['mrr'] / $active, 2) : 0.0;
 
         $denominator = $subStats['total'] - $subStats['expired'];
-        $churnRate   = $denominator > 0
+        $churnRate = $denominator > 0
             ? round(($subStats['cancelled'] / $denominator) * 100, 2)
             : 0.0;
 
@@ -230,13 +230,13 @@ class AnalyticsService
                 'cancelled' => $subStats['cancelled'],
                 'expired'   => $subStats['expired'],
             ],
-            'mrr'                     => $subStats['mrr'],
-            'arpu'                    => $arpu,
-            'total_revenue'           => $invStats['total_revenue'],
-            'churn_rate'              => $churnRate,
-            'trial_conversion_rate'   => $subStats['trial_conversion_rate'],
-            'pending_invoices'        => $invStats['pending_count'],
-            'overdue_invoices'        => $invStats['overdue_count'],
+            'mrr'                   => $subStats['mrr'],
+            'arpu'                  => $arpu,
+            'total_revenue'         => $invStats['total_revenue'],
+            'churn_rate'            => $churnRate,
+            'trial_conversion_rate' => $subStats['trial_conversion_rate'],
+            'pending_invoices'      => $invStats['pending_count'],
+            'overdue_invoices'      => $invStats['overdue_count'],
         ];
     }
 
@@ -277,5 +277,4 @@ class AnalyticsService
             ]);
         }, $subStats);
     }
-
 }
