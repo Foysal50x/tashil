@@ -194,8 +194,11 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
 
     public function churnedCount(\DateTimeInterface $since): int
     {
+        // Churn predicate: a subscription was cancelled by the user.
+        // Both immediate (status=Cancelled) and grace (status=PendingCancellation
+        // → later Expired) paths set cancelled_at; resume() clears it.
         return Subscription::query()
-            ->where('status', SubscriptionStatus::Cancelled)
+            ->whereNotNull('cancelled_at')
             ->where('cancelled_at', '>=', $since)
             ->count();
     }
@@ -215,9 +218,12 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
     {
         $earliestWindow = now()->subMonths($months - 1)->startOfMonth()->subDays($windowDays);
 
-        // Query 1: all cancelled dates in the entire range
+        // Query 1: all cancelled dates in the entire range. Covers both
+        // immediate cancels and grace cancels (which transition through
+        // PendingCancellation → Expired) — cancelled_at is the canonical
+        // signal of user-initiated churn.
         $cancelledDates = Subscription::query()
-            ->where('status', SubscriptionStatus::Cancelled)
+            ->whereNotNull('cancelled_at')
             ->where('cancelled_at', '>=', $earliestWindow)
             ->pluck('cancelled_at')
             ->map(fn ($d) => Carbon::parse($d));
@@ -404,7 +410,6 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
 
         $active = new Value(SubscriptionStatus::Active->value);
         $onTrial = new Value(SubscriptionStatus::OnTrial->value);
-        $cancelled = new Value(SubscriptionStatus::Cancelled->value);
         $expired = new Value(SubscriptionStatus::Expired->value);
 
         // Filter: status is active OR on_trial
@@ -412,6 +417,11 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
             new Equal("{$subscriptionsTable}.status", $active),
             new Equal("{$subscriptionsTable}.status", $onTrial),
         );
+
+        // Churn filter: any subscription the user cancelled (immediate or
+        // grace). cancelled_at is set by both cancel paths and cleared by
+        // resume(), so it's the canonical churn signal.
+        $cancelledFilter = new NotIsNull("{$subscriptionsTable}.cancelled_at");
 
         // MRR calculation per billing period — fully cross-DB
         $mrrCase = new CaseGroup([
@@ -440,7 +450,7 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 new Alias(new Count('*'), 'total'),
                 new Alias(new CountFilter($activeFilter), 'active'),
                 new Alias(new CountFilter(new Equal("{$subscriptionsTable}.status", $onTrial)), 'on_trial'),
-                new Alias(new CountFilter(new Equal("{$subscriptionsTable}.status", $cancelled)), 'cancelled'),
+                new Alias(new CountFilter($cancelledFilter), 'cancelled'),
                 new Alias(new CountFilter(new Equal("{$subscriptionsTable}.status", $expired)), 'expired'),
                 new Alias(new CountFilter(new NotIsNull("{$subscriptionsTable}.trial_ends_at")), 'total_trials'),
                 new Alias(
@@ -480,13 +490,15 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
 
         $active = new Value(SubscriptionStatus::Active->value);
         $onTrial = new Value(SubscriptionStatus::OnTrial->value);
-        $cancelled = new Value(SubscriptionStatus::Cancelled->value);
 
         // Filter: status is active OR on_trial
         $activeFilter = new CondOr(
             new Equal("{$subscriptionsTable}.status", $active),
             new Equal("{$subscriptionsTable}.status", $onTrial),
         );
+
+        // Churn filter: matches both immediate and grace cancellations.
+        $cancelledFilter = new NotIsNull("{$subscriptionsTable}.cancelled_at");
 
         // MRR calculation per billing period
         $mrrCase = new CaseGroup([
@@ -519,7 +531,7 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 "{$packagesTable}.name as package_name",
                 new Alias(new Count('*'), 'total_subscribers'),
                 new Alias(new CountFilter($activeFilter), 'active_subscribers'),
-                new Alias(new CountFilter(new Equal("{$subscriptionsTable}.status", $cancelled)), 'cancelled_count'),
+                new Alias(new CountFilter($cancelledFilter), 'cancelled_count'),
                 new Alias(new CountFilter(new NotIsNull("{$subscriptionsTable}.trial_ends_at")), 'total_trials'),
                 new Alias(
                     new CountFilter(new CondAnd(
