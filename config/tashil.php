@@ -1,6 +1,7 @@
 <?php
 
 use Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator;
+use Foysal50x\Tashil\Services\Generators\TransactionIdGenerator;
 
 return [
     /*
@@ -125,6 +126,22 @@ return [
         'prefix'    => 'INV',
         'format'    => '#-YYMMDD-NNNNNN', // #=Prefix, YY/MM/DD=Date, N=Digit, S=Letter, A=AlphaNumeric
         'generator' => InvoiceNumberGenerator::class,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Transaction Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Auto-generated transaction id for rows created without a gateway-
+    | supplied id — e.g. when an admin records a cash payment. Same
+    | format-token vocabulary as invoice numbering.
+    |
+    */
+    'transaction' => [
+        'prefix'    => 'TXN',
+        'format'    => '#-YYMMDD-NNNNNNAA',
+        'generator' => TransactionIdGenerator::class,
     ],
 
     /*

@@ -242,6 +242,11 @@ return new class extends Migration
             $table->timestamp('refunded_at')->nullable();
             $table->string('refund_reason')->nullable();
             $table->timestamps();
+
+            // Reconciliation guard: dedupe gateway webhooks by (gateway,
+            // transaction_id). NULL transaction_id stays allowed multiple
+            // times for pre-gateway-response rows on Postgres/MySQL/SQLite.
+            $table->unique(['gateway', 'transaction_id']);
         });
     }
 

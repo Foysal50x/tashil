@@ -18,7 +18,9 @@ use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
 use Foysal50x\Tashil\Contracts\UsageLogRepositoryInterface;
 use Foysal50x\Tashil\Managers\CacheManager;
 use Foysal50x\Tashil\Models\Invoice;
+use Foysal50x\Tashil\Models\Transaction;
 use Foysal50x\Tashil\Observers\InvoiceObserver;
+use Foysal50x\Tashil\Observers\TransactionObserver;
 use Foysal50x\Tashil\Repositories\Cache\CacheFeatureRepository;
 use Foysal50x\Tashil\Repositories\Cache\CacheInvoiceRepository;
 use Foysal50x\Tashil\Repositories\Cache\CachePackageRepository;
@@ -83,6 +85,7 @@ class TashilServiceProvider extends ServiceProvider
         }
 
         Invoice::observe(InvoiceObserver::class);
+        Transaction::observe(TransactionObserver::class);
     }
 
     // ── Redis ───────────────────────────────────────────────────

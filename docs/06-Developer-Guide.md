@@ -42,7 +42,8 @@ src/
   Managers/           DatabaseManager, CacheManager
   Models/             Eloquent models incl. immutable SubscriptionEvent /
                       SubscriptionFeature / FeatureUsage / UsageLog
-  Observers/          InvoiceObserver (auto-number + paid-handler)
+  Observers/          InvoiceObserver (auto-number + paid-handler),
+                      TransactionObserver (auto-id when blank)
   Providers/          TashilServiceProvider — registration + schedule wiring
   Repositories/       EloquentXRepository + Cache decorators
   Services/           SubscriptionService, UsageService, BillingService,
@@ -114,21 +115,58 @@ protected $listen = [
 
 A full event reference lives in [05-Reporting-Data-Model.md](05-Reporting-Data-Model.md).
 
-### 2. Custom invoice numbering
+### 2. Custom id generation (invoices & transactions)
 
-Implement your own generator and point the config at it:
+Both `tashil_invoices.invoice_number` and `tashil_transactions.transaction_id` are stamped by an observer (`InvoiceObserver::creating`, `TransactionObserver::creating`) when the column is empty. Each observer resolves its generator class from config:
 
 ```php
-class MyInvoiceNumberGenerator
-{
-    public function generate(): string { /* … */ }
-}
-
 // config/tashil.php
 'invoice' => [
-    'generator' => MyInvoiceNumberGenerator::class,
+    'prefix'    => 'INV',
+    'format'    => '#-YYMMDD-NNNNNN',
+    'generator' => InvoiceNumberGenerator::class,
+],
+'transaction' => [
+    'prefix'    => 'TXN',
+    'format'    => '#-YYMMDD-NNNNNNAA',
+    'generator' => TransactionIdGenerator::class,
 ],
 ```
+
+The transaction observer only fires when the row is created without a `transaction_id` — gateway-driven flows that already have a Stripe / Paddle / … id should pass it through and the observer leaves it alone. The auto-id path covers cases like an admin recording a cash payment.
+
+Both built-in generators share `TokenizedIdGenerator`, an abstract base that owns the token grammar (`#`, `YY`, `MM`, `DD`, `N`, `S`, `A`) and the `generate()` body. Subclasses declare only which config keys to read:
+
+```php
+namespace Foysal50x\Tashil\Services\Generators;
+
+class MyInvoiceNumberGenerator extends TokenizedIdGenerator
+{
+    protected function prefix(): string
+    {
+        return (string) config('tashil.invoice.prefix', 'INV');
+    }
+
+    protected function format(): string
+    {
+        return (string) config('tashil.invoice.format', '#-YYMMDD-NNNNNN');
+    }
+}
+```
+
+If you need a wholly different scheme (e.g. a Stripe-style `in_xxx` prefix-and-base58), skip the base class and implement `generate(): string` directly — the observers only require that method:
+
+```php
+class StripeStyleGenerator
+{
+    public function generate(): string
+    {
+        return 'in_' . bin2hex(random_bytes(12));
+    }
+}
+```
+
+Format-token entropy matters at bulk-insert time. The defaults give ~1M (`NNNNNN`) and ~1.3B (`NNNNNNAA`) combinations per `YYMMDD` bucket; the transaction default is wider because gateways can drop several hundred webhooks per minute. Widen the format if you expect more than ~√combos rows on a single day or you will hit birthday collisions. The composite `UNIQUE(gateway, transaction_id)` is the last line of defence; a colliding generator output will surface as a `UniqueConstraintViolationException` rather than silent corruption.
 
 ### 3. Custom repository implementations
 
@@ -202,6 +240,8 @@ The contract: tahsil owns subscription state and invoice issuance; the host owns
 ```
 
 For dunning, gateway webhook reconciliation, refund execution, the host wires the equivalent listeners. Tahsil's job ends at issuing the bill and reflecting the host's `markAsPaid` decision.
+
+When recording transactions, pass the gateway-supplied id through (Stripe `ch_…`, Paddle `txn_…`, etc.). The `UNIQUE(gateway, transaction_id)` constraint on `tashil_transactions` makes duplicate webhook deliveries safe — a second insert with the same pair throws `UniqueConstraintViolationException`, which the host should treat as "already recorded, ignore." For non-gateway payments (cash, manual bank transfer), leave `transaction_id` empty and `TransactionObserver::creating` will stamp a `TXN-…` id from `tashil.transaction.generator`.
 
 ## Adding the trait to a model
 
