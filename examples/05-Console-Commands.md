@@ -13,7 +13,7 @@ Tahsil ships six idempotent console commands. Auto-registered to the Laravel sch
 | `tashil:reset-quotas` | `0 0 * * *` (daily 00:00) | Reset feature usage counters whose `period_end` has elapsed; period anchored to previous `period_end` to avoid cron drift. |
 | `tashil:apply-pending-changes` | `*/5 * * * *` | Apply scheduled package changes (`scheduleDowngrade`) when their effective time arrives. |
 
-All accept `--date=YYYY-MM-DD HH:MM:SS` to run as-of a specific moment (testing, backfill).
+All accept `--date=Y-m-d H:i:s` to run as-of a specific moment (testing, backfill).
 
 ## Configuration
 

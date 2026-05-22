@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Tests only read code; never grant write/issues/PRs token scopes here.
+# Pinned explicitly so a permissive repo default cannot widen this.
+permissions:
+  contents: read
+
 jobs:
   tests:
     runs-on: ubuntu-latest
@@ -69,6 +74,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2

@@ -1,3 +1,6 @@
+<!-- markdownlint-disable-next-line MD033 MD041 -->
+<p align="center"><img src="images/cover.png" alt="Tahsil — Subscription management for Laravel" height="600px" width="100%" /></p>
+
 # Tashil – Subscription Management for Laravel
 
 **Tashil** (تسهيل) is a Laravel package for **subscription and feature management** with an immutable event store, atomic usage tracking, scheduled trial / quota / downgrade jobs, and a polymorphic subscriber trait.

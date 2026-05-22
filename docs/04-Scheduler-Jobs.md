@@ -166,7 +166,7 @@ Both forms produce identical behavior — Laravel resolves the same `Illuminate\
 
 ### Note: tahsil's own auto-wiring is version-agnostic
 
-`TashilServiceProvider::registerSchedule()` resolves the `Schedule` instance via `$this->app->booted(...)` and calls `$schedule->command(...)`. That binding has existed since Laravel 5, so the same provider code wires correctly under L10's Kernel-based scheduling and L11+/L13's `bootstrap/app.php` flow — no per-version branching needed inside the package.
+`TashilServiceProvider::registerSchedule()` resolves the `Schedule` instance via `$this->app->booted(...)` and calls `$schedule->command(...)`. That binding has existed since Laravel 5, so the same provider code wires correctly under L10's Kernel-based scheduling and L11+'s `bootstrap/app.php` flow — no per-version branching needed inside the package.
 
 ## Verifying
 

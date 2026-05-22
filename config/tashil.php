@@ -62,7 +62,7 @@ return [
     |
     | on_pending_invoice : policy when an unpaid invoice already exists at
     | renewal time. One of:
-    |   - 'cancel'        (default; preserves the existing tahsil behavior)
+    |   - 'cancel'        (default; preserves the existing tashil behavior)
     |   - 'skip'          (do nothing, retry next run)
     |   - 'extend_grace'  (push current_period_end by grace_days and try again)
     | grace_days         : extension applied when policy is 'extend_grace'.
