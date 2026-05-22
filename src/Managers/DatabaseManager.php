@@ -2,16 +2,16 @@
 
 namespace Foysal50x\Tashil\Managers;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 
 class DatabaseManager
 {
     public function connection(): Connection
     {
         $connectionName = Config::get('tashil.database.connection');
-        
+
         return DB::connection($connectionName);
     }
 

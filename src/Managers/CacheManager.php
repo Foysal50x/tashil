@@ -2,8 +2,8 @@
 
 namespace Foysal50x\Tashil\Managers;
 
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Support\Facades\Cache;
 
 class CacheManager
 {
@@ -54,7 +54,7 @@ class CacheManager
         return $this->store()->add($key, $value, $ttl);
     }
 
-    public function remember(string $key, \DateTimeInterface|\DateInterval|int|null $ttl = null, callable $callback): mixed
+    public function remember(string $key, \DateTimeInterface|\DateInterval|int|null $ttl, callable $callback): mixed
     {
         return $this->store()->remember($key, $ttl, $callback);
     }
@@ -75,9 +75,6 @@ class CacheManager
      * Note: This method is only supported by cache drivers that support tagging
      * (e.g., redis, memcached). It will throw an exception if used with
      * drivers that do not support tags (e.g., file, database).
-     *
-     * @param  array  $names
-     * @return mixed
      */
     public function tags(array $names): mixed
     {

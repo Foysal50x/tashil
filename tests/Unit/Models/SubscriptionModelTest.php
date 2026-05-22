@@ -3,6 +3,7 @@
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
+use Illuminate\Support\Carbon;
 
 beforeEach(function () {
     $this->package = Package::create([
@@ -27,8 +28,8 @@ it('creates a subscription with correct attributes', function () {
     expect($sub->status)->toBe(SubscriptionStatus::Active);
     expect($sub->auto_renew)->toBeTrue();
     expect($sub->metadata)->toBe(['source' => 'web']);
-    expect($sub->starts_at)->toBeInstanceOf(\Illuminate\Support\Carbon::class);
-    expect($sub->ends_at)->toBeInstanceOf(\Illuminate\Support\Carbon::class);
+    expect($sub->starts_at)->toBeInstanceOf(Carbon::class);
+    expect($sub->ends_at)->toBeInstanceOf(Carbon::class);
 });
 
 it('casts status to SubscriptionStatus enum', function () {
@@ -84,12 +85,12 @@ it('detects trial subscription', function () {
 
 it('detects cancelled subscription', function () {
     $sub = Subscription::create([
-        'subscriber_type' => 'App\\Models\\User',
-        'subscriber_id'   => 1,
-        'package_id'      => $this->package->id,
-        'status'          => 'cancelled',
-        'starts_at'       => now(),
-        'cancelled_at'    => now(),
+        'subscriber_type'     => 'App\\Models\\User',
+        'subscriber_id'       => 1,
+        'package_id'          => $this->package->id,
+        'status'              => 'cancelled',
+        'starts_at'           => now(),
+        'cancelled_at'        => now(),
         'cancellation_reason' => 'Too expensive',
     ]);
 
@@ -144,6 +145,7 @@ it('has status scopes', function () {
         'package_id'      => $this->package->id,
         'status'          => 'on_trial',
         'starts_at'       => now(),
+        'trial_ends_at'   => now()->addDays(7),
     ]);
 
     expect(Subscription::active()->count())->toBe(1);

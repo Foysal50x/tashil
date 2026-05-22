@@ -2,6 +2,7 @@
 
 namespace Foysal50x\Tashil\Models;
 
+use Foysal50x\Tashil\Database\Factories\PackageFactory;
 use Foysal50x\Tashil\Enums\Period;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,21 +17,21 @@ class Package extends BaseModel
 
     protected static function newFactory()
     {
-        return \Foysal50x\Tashil\Database\Factories\PackageFactory::new();
+        return PackageFactory::new();
     }
 
     protected $guarded = [];
 
     protected $casts = [
-        'billing_period'  => Period::class,
-        'price'           => 'decimal:2',
-        'original_price'  => 'decimal:2',
+        'billing_period'   => Period::class,
+        'price'            => 'decimal:2',
+        'original_price'   => 'decimal:2',
         'billing_interval' => 'integer',
-        'trial_days'      => 'integer',
-        'is_active'       => 'boolean',
-        'is_featured'     => 'boolean',
-        'sort_order'      => 'integer',
-        'metadata'        => 'array',
+        'trial_days'       => 'integer',
+        'is_active'        => 'boolean',
+        'is_featured'      => 'boolean',
+        'sort_order'       => 'integer',
+        'metadata'         => 'array',
     ];
 
     // ── Relationships ────────────────────────────────────────────
@@ -41,7 +42,7 @@ class Package extends BaseModel
             Feature::class,
             Config::get('tashil.database.prefix', 'tashil_') . Config::get('tashil.database.tables.package_feature', 'package_feature'),
             'package_id',
-            'feature_id'
+            'feature_id',
         )->withPivot(['value', 'is_available', 'sort_order'])->withTimestamps();
     }
 

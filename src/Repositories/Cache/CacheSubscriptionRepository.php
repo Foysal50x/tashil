@@ -6,6 +6,7 @@ use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
 use Foysal50x\Tashil\Managers\CacheManager;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -42,9 +43,9 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         return $result;
     }
 
-    public function syncFeatureItems(Subscription $subscription, Package $package): void
+    public function syncFeatures(Subscription $subscription, Package $package): void
     {
-        $this->repository->syncFeatureItems($subscription, $package);
+        $this->repository->syncFeatures($subscription, $package);
     }
 
     // ── Cached reads ────────────────────────────────────────────
@@ -65,7 +66,7 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
 
     public function subscriberHasValidSubscription(Model $subscriber, Package|string|null $package = null): bool
     {
-        $suffix = $package instanceof Package ? "has:{$package->id}" : "has:" . ($package ?? 'any');
+        $suffix = $package instanceof Package ? "has:{$package->id}" : 'has:' . ($package ?? 'any');
         $key = $this->subscriberKey($subscriber, $suffix);
 
         return $this->remember($key, function () use ($subscriber, $package) {
@@ -79,9 +80,29 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         return $this->repository->findCancelledResumable($subscriber);
     }
 
-    public function getExpiringSubscriptions(\DateTimeInterface $date, ?bool $autoRenew = null): \Illuminate\Database\Eloquent\Collection
+    public function dueForRenewal(\DateTimeInterface $moment): Collection
     {
-        return $this->repository->getExpiringSubscriptions($date, $autoRenew);
+        return $this->repository->dueForRenewal($moment);
+    }
+
+    public function dueForExpiration(\DateTimeInterface $moment): Collection
+    {
+        return $this->repository->dueForExpiration($moment);
+    }
+
+    public function dueForTrialExpiration(\DateTimeInterface $moment): Collection
+    {
+        return $this->repository->dueForTrialExpiration($moment);
+    }
+
+    public function trialsEndingSoon(\DateTimeInterface $now, int $warnDays): Collection
+    {
+        return $this->repository->trialsEndingSoon($now, $warnDays);
+    }
+
+    public function dueForPendingChange(\DateTimeInterface $moment): Collection
+    {
+        return $this->repository->dueForPendingChange($moment);
     }
 
     // ── Cached aggregates ───────────────────────────────────────

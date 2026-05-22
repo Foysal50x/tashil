@@ -2,132 +2,137 @@
 
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
+use Foysal50x\Tashil\Events\TrialExpired;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
 
-it('creates invoices for auto renewing subscriptions expiring today', function () {
-    Carbon::setTestNow('2023-01-01 00:00:00');
+beforeEach(function () {
+    Carbon::setTestNow('2026-01-15 00:00:00');
+});
+
+afterEach(function () {
+    Carbon::setTestNow();
+});
+
+it('renew-subscriptions creates an invoice when current_period_end has elapsed', function () {
+    $package = Package::factory()->create(['price' => 100]);
+    $subscription = Subscription::factory()->create([
+        'package_id'           => $package->id,
+        'status'               => SubscriptionStatus::Active,
+        'auto_renew'           => true,
+        'current_period_start' => now()->subMonth(),
+        'current_period_end'   => now()->subDay(),
+        'ends_at'              => now()->subDay(),
+    ]);
+
+    $this->artisan('tashil:renew-subscriptions')->assertSuccessful();
+
+    $this->assertDatabaseHas((new Invoice)->getTable(), [
+        'subscription_id' => $subscription->id,
+        'status'          => InvoiceStatus::Pending,
+    ]);
+});
+
+it('renew-subscriptions cancels when a pending invoice already exists (default policy)', function () {
+    config(['tashil.renewal.on_pending_invoice' => 'cancel']);
 
     $package = Package::factory()->create(['price' => 100]);
     $subscription = Subscription::factory()->create([
-        'package_id' => $package->id,
-        'ends_at' => Carbon::today(),
-        'auto_renew' => true,
-        'status' => SubscriptionStatus::Active,
+        'package_id'           => $package->id,
+        'status'               => SubscriptionStatus::Active,
+        'auto_renew'           => true,
+        'current_period_start' => now()->subMonth(),
+        'current_period_end'   => now()->subDay(),
+        'ends_at'              => now()->subDay(),
     ]);
 
-    $this->artisan('tashil:process-subscriptions')
-        ->assertSuccessful();
-
-    $invoiceTable = (new Invoice)->getTable();
-
-    $this->assertDatabaseHas($invoiceTable, [
+    Invoice::factory()->create([
         'subscription_id' => $subscription->id,
-        'amount' => 100,
-        'status' => InvoiceStatus::Pending,
+        'status'          => InvoiceStatus::Pending,
     ]);
-    
+
+    $this->artisan('tashil:renew-subscriptions')->assertSuccessful();
+
+    expect($subscription->invoices()->count())->toBe(1);
+    $subscription->refresh();
+    expect($subscription->status)->toBe(SubscriptionStatus::PendingCancellation);
+    expect($subscription->cancellation_reason)->toContain('Auto-renewal failed');
+});
+
+it('renew-subscriptions skips when policy is skip', function () {
+    config(['tashil.renewal.on_pending_invoice' => 'skip']);
+
+    $package = Package::factory()->create();
+    $subscription = Subscription::factory()->create([
+        'package_id'         => $package->id,
+        'status'             => SubscriptionStatus::Active,
+        'auto_renew'         => true,
+        'current_period_end' => now()->subDay(),
+    ]);
+    Invoice::factory()->create([
+        'subscription_id' => $subscription->id,
+        'status'          => InvoiceStatus::Pending,
+    ]);
+
+    $this->artisan('tashil:renew-subscriptions')->assertSuccessful();
+
+    expect($subscription->invoices()->count())->toBe(1);
     expect($subscription->refresh()->status)->toBe(SubscriptionStatus::Active);
 });
 
-it('cancels auto renewing subscription if pending invoice exists', function () {
-    Carbon::setTestNow('2023-01-01 00:00:00');
-
-    $package = Package::factory()->create(['price' => 100]);
+it('expire-subscriptions promotes auto_renew=false past ends_at to Expired', function () {
     $subscription = Subscription::factory()->create([
-        'package_id' => $package->id,
-        'ends_at' => Carbon::today(),
-        'auto_renew' => true,
-        'status' => SubscriptionStatus::Active,
-    ]);
-
-    // Create an existing pending invoice
-    Invoice::factory()->create([
-        'subscription_id' => $subscription->id,
-        'status' => InvoiceStatus::Pending,
-    ]);
-
-    $this->artisan('tashil:process-subscriptions')
-        ->assertSuccessful();
-
-    // Should NOT create a new invoice (count was 1, should stay 1)
-    expect($subscription->invoices)->toHaveCount(1);
-
-    // Subscription should be cancelled
-    $subscription->refresh();
-    // Depending on logic, it might be Cancelled or Expired. The code sets Cancelled.
-    expect($subscription->status === SubscriptionStatus::Cancelled || $subscription->cancelled_at !== null)->toBeTrue();
-});
-
-it('expires subscriptions that do not auto renew', function () {
-    Carbon::setTestNow('2023-01-01 00:00:00');
-
-    $subscription = Subscription::factory()->create([
-        'ends_at' => Carbon::today(),
+        'ends_at'    => now()->subDay(),
         'auto_renew' => false,
-        'status' => SubscriptionStatus::Active,
+        'status'     => SubscriptionStatus::Active,
     ]);
 
-    $this->artisan('tashil:process-subscriptions')
-        ->assertSuccessful();
+    $this->artisan('tashil:expire-subscriptions')->assertSuccessful();
 
     expect($subscription->refresh()->status)->toBe(SubscriptionStatus::Expired);
 });
 
-it('fetches all expiring subscriptions when auto renew is null', function () {
-    Carbon::setTestNow('2023-01-01 00:00:00');
-
-    $package = Package::factory()->create();
-    
-    // Auto-renewing subscription
-    Subscription::factory()->create([
-        'package_id' => $package->id,
-        'ends_at' => Carbon::today(),
-        'auto_renew' => true,
-        'status' => SubscriptionStatus::Active,
+it('expire-subscriptions promotes pending-cancellation past grace to Expired', function () {
+    $subscription = Subscription::factory()->create([
+        'status'                    => SubscriptionStatus::PendingCancellation,
+        'cancellation_effective_at' => now()->subDay(),
+        'auto_renew'                => false,
     ]);
 
-    // Non-auto-renewing subscription
-    Subscription::factory()->create([
-        'package_id' => $package->id,
-        'ends_at' => Carbon::today(),
-        'auto_renew' => false,
-        'status' => SubscriptionStatus::Active,
-    ]);
+    $this->artisan('tashil:expire-subscriptions')->assertSuccessful();
 
-    // Subscription expiring tomorrow (should not be fetched)
-    Subscription::factory()->create([
-        'package_id' => $package->id,
-        'ends_at' => Carbon::tomorrow(),
-        'auto_renew' => true,
-        'status' => SubscriptionStatus::Active,
-    ]);
-
-    $repo = app(\Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface::class);
-    $expiring = $repo->getExpiringSubscriptions(Carbon::today(), null);
-
-    expect($expiring)->toHaveCount(2);
+    expect($subscription->refresh()->status)->toBe(SubscriptionStatus::Expired);
 });
 
-it('does not process subscriptions expiring tomorrow', function () {
-    Carbon::setTestNow('2023-01-01 00:00:00');
+it('does not expire future-period subscriptions', function () {
+    $subscription = Subscription::factory()->create([
+        'ends_at'    => now()->addDay(),
+        'auto_renew' => false,
+        'status'     => SubscriptionStatus::Active,
+    ]);
+
+    $this->artisan('tashil:expire-subscriptions')->assertSuccessful();
+
+    expect($subscription->refresh()->status)->toBe(SubscriptionStatus::Active);
+});
+
+it('expire-trials promotes overdue trials and dispatches TrialExpired', function () {
+    Event::fake([TrialExpired::class]);
 
     $subscription = Subscription::factory()->create([
-        'ends_at' => Carbon::tomorrow(),
-        'auto_renew' => true,
-        'status' => SubscriptionStatus::Active,
+        'status'             => SubscriptionStatus::OnTrial,
+        'trial_started_at'   => now()->subDays(15),
+        'trial_ends_at'      => now()->subDay(),
+        'trial_converted_at' => null,
     ]);
 
-    $this->artisan('tashil:process-subscriptions')
-        ->assertSuccessful();
+    $this->artisan('tashil:expire-trials')->assertSuccessful();
 
-    $invoiceTable = (new Invoice)->getTable();
-
-    $this->assertDatabaseMissing($invoiceTable, [
-        'subscription_id' => $subscription->id,
-    ]);
-    
-    expect($subscription->refresh()->status)->toBe(SubscriptionStatus::Active);
+    $subscription->refresh();
+    expect($subscription->status)->toBe(SubscriptionStatus::Expired);
+    expect($subscription->trial_expired_at)->not->toBeNull();
+    Event::assertDispatched(TrialExpired::class);
 });

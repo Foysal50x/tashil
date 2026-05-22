@@ -1,24 +1,33 @@
+<!-- markdownlint-disable-next-line MD033 MD041 -->
+<p align="center"><img src="images/cover.png" alt="Tahsil — Subscription management for Laravel" height="600px" width="100%" /></p>
+
 # Tashil – Subscription Management for Laravel
 
-**Tashil** (تسهيل) is a comprehensive subscription management package for Laravel with built-in Redis caching, feature-gated access, usage tracking, billing, and analytics.
+**Tashil** (تسهيل) is a Laravel package for **subscription and feature management** with an immutable event store, atomic usage tracking, scheduled trial / quota / downgrade jobs, and a polymorphic subscriber trait.
+
+It **owns** plan definitions, subscription state, feature gating, usage counters, trial lifecycle, scheduled transitions, and invoice issuance.
+
+It **does not charge** — payment capture, dunning retries, refunds, and gateway reconciliation are delegated to a third-party integration in the host application.
 
 ---
 
 ## Table of Contents
 
 - [Installation](#installation)
-- [Configuration](#configuration)
 - [Quick Start](#quick-start)
+- [Configuration](#configuration)
 - [Subscriptions](#subscriptions)
-- [Usage Tracking](#usage-tracking)
-- [Billing & Invoices](#billing--invoices)
-- [Console Commands](#console-commands)
+- [Feature System](#feature-system)
+- [Trial System](#trial-system)
+- [Invoices](#invoices)
+- [Scheduler](#scheduler)
+- [Events](#events)
 - [Analytics & Reporting](#analytics--reporting)
 - [HasSubscriptions Trait](#hassubscriptions-trait)
-- [Events](#events)
 - [Caching Architecture](#caching-architecture)
-- [API Reference](#api-reference)
-- [Examples](#examples)
+- [Documentation](#documentation)
+- [Testing](#testing)
+- [License](#license)
 
 ---
 
@@ -26,9 +35,20 @@
 
 ### Requirements
 
-- PHP 8.2+
-- Laravel 10.x, 11.x, or 12.x
-- Redis (for caching layer)
+- PHP 8.2 — 8.5
+- Laravel 10.x, 11.x, 12.x, or 13.x
+- Redis (optional — only when the caching layer is enabled)
+
+Per-version compatibility:
+
+| Laravel | Released | PHP | Manual scheduler wiring location |
+|---|---|---|---|
+| 10.x | Feb 2023 | 8.2 / 8.3 | `app/Console/Kernel.php` |
+| 11.x | Mar 2024 | 8.2 / 8.3 / 8.4 | `routes/console.php` or `bootstrap/app.php` `->withSchedule()` |
+| 12.x | Feb 2025 | 8.2 – 8.5 | `routes/console.php` or `bootstrap/app.php` `->withSchedule()` |
+| 13.x | Mar 2026 | 8.3 / 8.4 / 8.5 | `routes/console.php` or `bootstrap/app.php` `->withSchedule()` |
+
+Auto-registration (`tashil.schedule.enabled = true`, default) is **version-agnostic** — the same provider wires correctly under L10's Kernel and L11+/L13's `bootstrap/app.php` flow. You only have to think about Laravel versions if you disable auto-registration and wire commands yourself; see [docs/04-Scheduler-Jobs.md](docs/04-Scheduler-Jobs.md#disabling-auto-registration) for L10 / L11+ examples side-by-side.
 
 ### Install via Composer
 
@@ -46,105 +66,20 @@ php artisan migrate
 
 ---
 
-## Configuration
-
-After publishing, update `config/tashil.php` as needed:
-
-```php
-return [
-    /*
-    |--------------------------------------------------------------------------
-    | Database Configuration
-    |--------------------------------------------------------------------------
-    */
-    'database' => [
-        // The database connection to use for Tashil tables.
-        // If null, the default application connection will be used.
-        'connection' => env('TASHIL_DB_CONNECTION', null),
-
-        // Table prefix for all Tashil tables.
-        'prefix' => 'tashil_',
-
-        // Customise table names used by the package.
-        'tables' => [
-            'packages'           => 'packages',
-            'features'           => 'features',
-            'package_feature'    => 'package_feature',
-            'subscriptions'      => 'subscriptions',
-            'subscription_items' => 'subscription_items',
-            'usage_logs'         => 'usage_logs',
-            'invoices'           => 'invoices',
-            'transactions'       => 'transactions',
-        ],
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Invoice Configuration
-    |--------------------------------------------------------------------------
-    */
-    'invoice' => [
-        'prefix'    => 'INV',
-        'format'    => '#-YYMMDD-NNNNNN', // #=Prefix, YY/MM/DD=Date, N=Digit, S=Letter, A=AlphaNumeric
-        'generator' => Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator::class,
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Default Currency
-    |--------------------------------------------------------------------------
-    */
-    'currency' => env('TASHIL_CURRENCY', 'USD'),
-
-    /*
-    |--------------------------------------------------------------------------
-    | Redis Configuration
-    |--------------------------------------------------------------------------
-    */
-    'redis' => [
-        'host'     => env('TASHIL_REDIS_HOST', env('REDIS_HOST', '127.0.0.1')),
-        'password' => env('TASHIL_REDIS_PASSWORD', env('REDIS_PASSWORD', null)),
-        'port'     => env('TASHIL_REDIS_PORT', env('REDIS_PORT', 6379)),
-        'database' => env('TASHIL_REDIS_DB', 5),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Cache Configuration
-    |--------------------------------------------------------------------------
-    */
-    'cache' => [
-        // Prefix for all cache keys generated by Tashil.
-        'prefix' => env('TASHIL_CACHE_PREFIX', 'tashil_cache:'),
-
-        // Default Time To Live (TTL) in seconds for cached items.
-        'ttl' => 3600,
-
-        // Whether to enable the caching layer globally.
-        'enabled' => env('TASHIL_CACHE_ENABLED', true),
-    ],
-];
-```
-
----
-
 ## Quick Start
 
 ```php
 use Foysal50x\Tashil\Facades\Tashil;
+use Foysal50x\Tashil\Enums\ResetPeriod;
 
-// 1. Create features
-$apiCalls = Tashil::feature('api-calls')
-    ->name('API Calls')
-    ->limit()
-    ->create();
+// 1. Define features (catalog)
+$apiCalls = Tashil::feature('api-calls')->name('API Calls')->limit()->create();
+$darkMode = Tashil::feature('dark-mode')->name('Dark Mode')->boolean()->create();
+$storage  = Tashil::feature('storage-gb')->name('Storage (GB)')->consumable()->create();
 
-$darkMode = Tashil::feature('dark-mode')
-    ->name('Dark Mode')
-    ->boolean()
-    ->create();
+$apiCalls->update(['reset_period' => ResetPeriod::Monthly]); // resets each month
 
-// 2. Create a package with features
+// 2. Define a package
 $proPlan = Tashil::package('pro')
     ->name('Pro Plan')
     ->price(29.99)
@@ -152,494 +87,310 @@ $proPlan = Tashil::package('pro')
     ->trialDays(14)
     ->feature($apiCalls, value: '10000')
     ->feature($darkMode, value: 'true')
+    ->feature($storage,  value: '50')
     ->create();
 
-// 3. Subscribe a user
+// 3. Subscribe a user — User uses the HasSubscriptions trait
 $subscription = Tashil::subscription()->subscribe($user, $proPlan, withTrial: true);
 
-// 4. Check feature access & track usage
-if ($user->canUseFeature('api-calls')) {
-    $user->incrementUsage('api-calls');
+// 4. Gate access + track usage
+if ($user->hasFeature('api-calls')) {
+    $user->useFeature('api-calls');         // atomic increment, returns false if over limit
 }
 
-// 5. Get analytics
-$summary = Tashil::analytics()->dashboardSummary();
+// 5. Report absolute usage for storage-style features
+$user->reportStorage('storage-gb', 38.5);   // 38.5 GB
+
+// 6. Lifecycle ops
+$user->cancelSubscription();                                 // grace cancel
+$user->pauseSubscription(); $user->unpauseSubscription();
+$user->scheduleDowngrade($basicPlan);                        // applied at period end
+$user->switchPlan($enterprisePlan);                          // immediate
+
+// 7. Analytics
+$kpis = Tashil::analytics()->dashboardSummary();
 ```
 
 ---
 
-## Features
+## Configuration
 
-### 📦 Subscription Management
-
-- **Flexible Plans**: Create unlimited packages with custom billing intervals (daily, weekly, monthly, yearly) or lifetime access.
-- **Trial Periods**: Configurable trial days per package.
-- **Lifecycle Management**: Subscribe, cancel (gracefully or immediately), resume, and switch plans with prorated handling.
-- **State Management**: Robust status handling (Active, OnTrial, Cancelled, Expired) using Enums.
-
-### 💰 Billing & Invoices
-
-- **Automated Invoicing**: Generates invoices for subscriptions and renewals.
-- **Custom Currencies**: Support for package-specific currencies.
-- **Proration**: Handles plan switching calculations.
-- **Grace Periods**: Configurable due dates and overdue handling.
-
-### ⚡ Feature Access & Usage Tracking
-
-- **Granular Permissions**:
-  - **Boolean**: Simple on/off access (e.g., "Pro Dashboard").
-  - **Limit**: Numerical quotas (e.g., "10 Projects").
-  - **Consumable**: One-time use tokens (e.g., "5 AI Credits").
-- **Usage Tracking**: Real-time tracking of feature usage.
-- **Limit Enforcement**: Automatically blocks actions when limits are exceeded.
-- **Usage Warnings**: Dispatches events when usage hits thresholds (e.g., 80%).
-- **Resets**: Reset limits manually or automatically on renewal.
-
-### 📊 Analytics & Reporting
-
-- **Dashboard Summary**: All-in-one KPI method for quick admin dashboards (uses batch queries — only 2 DB queries).
-- **Revenue Metrics**:
-  - MRR (Monthly Recurring Revenue) & ARPU (Average Revenue Per User).
-  - Total Revenue & Revenue by Package.
-  - Revenue trends over time.
-- **Growth Metrics**:
-  - New Subscriptions trend.
-  - Trial Conversion Rates.
-  - Churn Rate & Churn Trends (batch-optimized — 2 queries instead of 24).
-- **Operational Metrics**:
-  - Pending & Overdue Invoice counts.
-  - Active vs. Inactive Subscriber breakdowns.
-- **Cross-Database Compatibility**: All analytics queries use [`tpetry/laravel-query-expressions`](https://github.com/tpetry/laravel-query-expressions) — no raw SQL.
-
-### 🛠️ Developer Experience
-
-- **Trait-based Integration**: Add `use HasSubscriptions` to any model (User, Team, etc.).
-- **Fluent API**:
-  - `$user->subscribe($package)`
-  - `$user->onPlan('pro')`
-  - `$user->canUseFeature('api-calls')`
-- **Events**: Rich event system (`SubscriptionCreated`, `SubscriptionRenewed`, `UsageLimitWarning`) for custom hook integration.
-- **Repository Pattern**: Swappable repositories for caching and database abstraction.
-- **High Performance**: In-memory subscription caching, batch queries, and Redis caching support.
-
-### Feature Types
-
-Tashil supports four feature types:
-
-| Type | Enum | Description |
-|------|------|-------------|
-| **Boolean** | `FeatureType::Boolean` | On/off toggle (e.g. dark mode) |
-| **Limit** | `FeatureType::Limit` | Numeric limit with enforcement (e.g. 10,000 API calls) |
-| **Consumable** | `FeatureType::Consumable` | Trackable usage without hard limit |
-| **Enum** | `FeatureType::Enum` | Named option value |
-
-### Creating Features with FeatureBuilder
+After publishing, edit `config/tashil.php`:
 
 ```php
-use Foysal50x\Tashil\Facades\Tashil;
-
-// Boolean feature
-$feature = Tashil::feature('priority-support')
-    ->name('Priority Support')
-    ->description('Access to priority support channels')
-    ->boolean()
-    ->create();
-
-// Limit feature
-$feature = Tashil::feature('api-calls')
-    ->name('API Calls')
-    ->limit()
-    ->metadata(['reset_period' => 'monthly'])
-    ->create();
-
-// Consumable feature
-$feature = Tashil::feature('storage')
-    ->name('Storage (GB)')
-    ->consumable()
-    ->create();
-
-// Create or update (idempotent by slug)
-$feature = Tashil::feature('api-calls')
-    ->name('API Calls (Updated)')
-    ->limit()
-    ->createOrUpdate();
-```
-
-### Creating Packages with PackageBuilder
-
-```php
-use Foysal50x\Tashil\Facades\Tashil;
-
-$package = Tashil::package('pro')
-    ->name('Pro Plan')
-    ->description('For growing teams')
-    ->price(29.99)
-    ->originalPrice(49.99)         // strike-through price
-    ->monthly()                     // or ->yearly(), ->quarterly(), ->lifetime()
-    ->trialDays(14)
-    ->featured()                    // mark as featured plan
-    ->sortOrder(2)
-    ->feature($apiCalls, value: '10000')
-    ->feature($darkMode, value: 'true')
-    ->feature($storage, value: '50')
-    ->create();
-
-// Attach multiple features at once
-$package = Tashil::package('enterprise')
-    ->name('Enterprise')
-    ->price(99.99)
-    ->yearly()
-    ->features([
-        $apiCalls  => ['value' => '100000'],
-        $darkMode  => ['value' => 'true'],
-        $storage   => ['value' => '500'],
-    ])
-    ->create();
-```
-
-### Billing Periods
-
-| Period | Enum | Example |
-|--------|------|---------|
-| Daily | `Period::Day` | `->billingPeriod(Period::Day, 1)` |
-| Weekly | `Period::Week` | `->billingPeriod(Period::Week, 1)` |
-| Monthly | `Period::Month` | `->monthly()` |
-| Quarterly | – | `->quarterly()` |
-| Yearly | `Period::Year` | `->yearly()` |
-| Lifetime | `Period::Lifetime` | `->lifetime()` |
-
----
-
-## Subscriptions
-
-### Subscription Lifecycle
-
-```
-subscribe() ──▶ OnTrial ──▶ Active ──▶ cancel() ──▶ Cancelled
-                  │                        │
-                  └─ (trial ends) ─────────┘        resume()
-                                                      │
-                                               ◀──────┘
-```
-
-### Subscription Statuses
-
-| Status | Enum | Meaning |
-|--------|------|---------|
-| Pending | `SubscriptionStatus::Pending` | Awaiting activation |
-| Active | `SubscriptionStatus::Active` | Currently active |
-| On Trial | `SubscriptionStatus::OnTrial` | In free trial period |
-| Past Due | `SubscriptionStatus::PastDue` | Payment overdue |
-| Cancelled | `SubscriptionStatus::Cancelled` | User cancelled |
-| Expired | `SubscriptionStatus::Expired` | Subscription period ended |
-| Suspended | `SubscriptionStatus::Suspended` | Admin-suspended |
-
-### Creating Subscriptions
-
-```php
-use Foysal50x\Tashil\Facades\Tashil;
-
-// Subscribe without trial
-$subscription = Tashil::subscription()->subscribe($user, $package);
-
-// Subscribe with trial (uses package's trial_days)
-$subscription = Tashil::subscription()->subscribe($user, $package, withTrial: true);
-```
-
-When a subscription is created:
-
-1. The subscription record is persisted with calculated `ends_at`
-2. Feature items from the package are synced to the subscription
-3. A `SubscriptionCreated` event is dispatched
-
-### Cancelling
-
-```php
-// Cancel at end of billing period (grace period)
-Tashil::subscription()->cancel($subscription, reason: 'Too expensive');
-
-// Cancel immediately
-Tashil::subscription()->cancel($subscription, immediate: true);
-```
-
-### Resuming
-
-```php
-// Resume a cancelled subscription (only if ends_at is in the future)
-Tashil::subscription()->resume($subscription);
-```
-
-### Switching Plans
-
-```php
-// Switch to a different package (cancels old, creates new)
-$newSubscription = Tashil::subscription()->switchPlan($subscription, $newPackage);
-```
-
-### Checking Subscription Status
-
-```php
-$subscription->isActive();    // true if status is Active
-$subscription->isOnTrial();   // true if status is OnTrial
-$subscription->isCancelled(); // true if status is Cancelled
-$subscription->isExpired();   // true if status is Expired
-$subscription->isPastDue();   // true if status is PastDue
-$subscription->isValid();     // true if Active or OnTrial
-```
-
----
-
-## Usage Tracking
-
-### Incrementing Usage
-
-```php
-use Foysal50x\Tashil\Facades\Tashil;
-
-// Increment by 1
-Tashil::usage()->increment($subscription, 'api-calls');
-
-// Increment by custom amount
-Tashil::usage()->increment($subscription, 'storage', amount: 2.5);
-```
-
-Returns `false` if:
-
-- The feature doesn't exist on the subscription
-- The usage would exceed the feature's limit
-
-### Checking Access
-
-```php
-// Can the feature be consumed?
-$canUse = Tashil::usage()->check($subscription, 'api-calls');
-
-// Check a specific amount
-$canUse = Tashil::usage()->check($subscription, 'storage', amount: 10);
-```
-
-### Resetting Usage
-
-```php
-// Reset a single feature
-Tashil::usage()->resetUsage($subscription, 'api-calls');
-
-// Reset all features
-Tashil::usage()->resetAllUsage($subscription);
-```
-
-### Usage Warnings
-
-When a feature reaches **80% usage**, a `UsageLimitWarning` event is dispatched automatically. Listen for this in your `EventServiceProvider`:
-
-```php
-use Foysal50x\Tashil\Events\UsageLimitWarning;
-
-protected $listen = [
-    UsageLimitWarning::class => [
-        SendUsageWarningNotification::class,
+return [
+    'database' => [
+        'connection' => env('TASHIL_DB_CONNECTION', null),
+        'prefix'     => 'tashil_',
+        'tables' => [
+            'packages'              => 'packages',
+            'features'              => 'features',
+            'package_feature'       => 'package_feature',
+            'subscriptions'         => 'subscriptions',
+            'subscription_features' => 'subscription_features',
+            'feature_usages'        => 'feature_usages',
+            'usage_logs'            => 'usage_logs',
+            'subscription_events'   => 'subscription_events',
+            'invoices'              => 'invoices',
+            'transactions'          => 'transactions',
+        ],
     ],
+
+    'invoice' => [
+        'prefix'    => 'INV',
+        'format'    => '#-YYMMDD-NNNNNN',
+        'generator' => Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator::class,
+    ],
+
+    'currency' => env('TASHIL_CURRENCY', 'USD'),
+
+    'trial' => [
+        'warn_days'  => env('TASHIL_TRIAL_WARN_DAYS', 3),
+        'grace_days' => env('TASHIL_TRIAL_GRACE_DAYS', 0),
+    ],
+
+    'renewal' => [
+        'on_pending_invoice' => env('TASHIL_RENEWAL_ON_PENDING_INVOICE', 'cancel'),
+        'grace_days'         => env('TASHIL_RENEWAL_GRACE_DAYS', 3),
+    ],
+
+    'schedule' => [
+        'enabled'   => env('TASHIL_SCHEDULE_ENABLED', true),
+        'overrides' => [],
+    ],
+
+    'events' => [
+        'async' => env('TASHIL_EVENTS_ASYNC', true),
+    ],
+
+    'redis' => [/* … */],
+    'cache' => [/* … */],
 ];
 ```
 
 ---
 
-## Billing & Invoices
+## Subscriptions
 
-### Generating Invoices
+### Subscription states
+
+| State | Enum case | Means |
+|---|---|---|
+| Pending | `SubscriptionStatus::Pending` | Initial placeholder. |
+| Active | `SubscriptionStatus::Active` | Currently active. |
+| OnTrial | `SubscriptionStatus::OnTrial` | In trial — strict: `trial_ends_at` must be in the future. |
+| PastDue | `SubscriptionStatus::PastDue` | Host marks this when payment is late. |
+| Paused | `SubscriptionStatus::Paused` | Host paused; counter still exists but `isValid()` is false. |
+| PendingCancellation | `SubscriptionStatus::PendingCancellation` | Grace-cancelled — still valid until `ends_at`. |
+| Cancelled | `SubscriptionStatus::Cancelled` | Immediately cancelled, access revoked. |
+| Expired | `SubscriptionStatus::Expired` | Past access window. |
+| Suspended | `SubscriptionStatus::Suspended` | Admin-suspended. |
+
+### Lifecycle
+
+```text
+subscribe ─► Active ───────────────► PendingCancellation ─► Expired
+       │      │                        ▲
+       │      ├─► Paused ─► Active     │
+       │      ├─► switched (new sub)   │
+       │      └─► Cancelled            │
+       └─► OnTrial ─► (convert) ─► Active
+                  └─► (expire) ─► Expired
+```
+
+### Service API
 
 ```php
 use Foysal50x\Tashil\Facades\Tashil;
 
-// Generate invoice using the package price
-$invoice = Tashil::billing()->generateInvoice($subscription);
-
-// Generate with custom amount
-$invoice = Tashil::billing()->generateInvoice($subscription, amount: 39.99);
+Tashil::subscription()->subscribe($user, $package, withTrial: true);
+Tashil::subscription()->cancel($sub);                              // grace
+Tashil::subscription()->cancel($sub, immediate: true, reason: 'x');
+Tashil::subscription()->resume($sub);                              // only PendingCancellation
+Tashil::subscription()->pause($sub); Tashil::subscription()->unpause($sub);
+Tashil::subscription()->switchPlan($sub, $newPackage);
+Tashil::subscription()->scheduleDowngrade($sub, $targetPackage);
+Tashil::subscription()->cancelPendingChange($sub);
+Tashil::subscription()->convertTrial($sub);
+Tashil::subscription()->expireTrial($sub);
+Tashil::subscription()->expire($sub);
+Tashil::subscription()->advancePeriod($sub);    // invoked by InvoiceObserver
 ```
 
-Each invoice gets a unique number in the format `INV-YYYYMMDD-XXXXXX`.
+### Grace cancellation semantics
 
-### Invoice Statuses
+`cancel(immediate: false)` does **not** revoke access. The subscription enters `PendingCancellation`, keeps `ends_at`, and stays in the `Subscription::valid()` scope. The `tashil:expire-subscriptions` job promotes it to `Expired` once `cancellation_effective_at` passes. `$user->subscribed()` returns `true` for the entire grace window.
 
-| Status | Enum |
-|--------|------|
-| Draft | `InvoiceStatus::Draft` |
-| Pending | `InvoiceStatus::Pending` |
-| Paid | `InvoiceStatus::Paid` |
-| Void | `InvoiceStatus::Void` |
-| Refunded | `InvoiceStatus::Refunded` |
+### Immutable event log
 
-### Managing Invoices
+Every transition appends to `tashil_subscription_events` with a monotonic per-subscription `sequence_num` (assigned under a `SELECT … FOR UPDATE` lock) and an optional `idempotency_key`. Read it back:
 
 ```php
-// Mark invoice as paid
-$invoice->markAsPaid();
+$sub->events()->orderBy('sequence_num')->get();
 
-// Void an invoice
-$invoice->markAsVoid();
+Tashil::events()->append($sub, 'host.custom.thing', payload: [...], idempotencyKey: 'op-42');
 ```
+
+See [docs/05-Reporting-Data-Model.md](docs/05-Reporting-Data-Model.md).
 
 ---
 
-## Console Commands
+## Feature System
 
-### Process Subscriptions
+Four feature types, all with consistent storage + atomic enforcement:
 
-Automates subscription renewals and expirations. Suggested to run daily.
+| Type | Behavior |
+|---|---|
+| `FeatureType::Boolean` | Pure on/off; `value` is `"true"` or `"false"`. |
+| `FeatureType::Limit` | Numeric quota with hard enforcement via atomic conditional UPDATE. |
+| `FeatureType::Consumable` | Tracked usage without a hard ceiling (soft metering). |
+| `FeatureType::Enum` | Named option / tier label. |
 
-```bash
-php artisan tahsil:process-subscriptions
-```
+### Reset cadence (`ResetPeriod`)
 
-- **Renewals**: Creates invoices for auto-renewing subscriptions expiring today.
-- **Expirations**: Marks non-renewing subscriptions as expired.
+`never` / `daily` / `weekly` / `monthly` / `yearly`. The `tashil:reset-quotas` job advances `period_start`/`period_end` anchored to the previous `period_end` — a late cron doesn't drift the cadence.
+
+### Snapshot + counter
+
+On subscribe (or on plan switch), tahsil writes **two rows per feature**:
+
+- `tashil_subscription_features` — **immutable** snapshot of the feature config at that moment. Old snapshots are stamped `superseded_at` and kept forever.
+- `tashil_feature_usages` — **mutable** counter with cached `limit_value`, period window, and the running `usage` value.
+
+### Atomic increment
 
 ```php
-// app/Console/Kernel.php or routes/console.php
-$schedule->command('tashil:process-subscriptions')->daily();
+$user->useFeature('api-calls', 1);
+```
+
+becomes:
+
+```sql
+UPDATE tashil_feature_usages
+SET usage = usage + :amount
+WHERE id = :id
+  AND (limit_value IS NULL OR usage + :amount <= limit_value)
+```
+
+Two concurrent callers cannot both succeed past the limit. The increment returns `false` on rejection without touching the row. Every successful change writes `previous_usage` + `new_usage` to `tashil_usage_logs`.
+
+### Absolute reporting
+
+```php
+$user->reportStorage('storage-gb', 12.5);
+```
+
+Use when the host knows the absolute value (storage bytes, AI compute hours). `UsageLimitWarning` fires only on crossings of 80%, not on every report.
+
+See [docs/02-Feature-System.md](docs/02-Feature-System.md).
+
+---
+
+## Trial System
+
+Trials are first-class. Four timestamps capture the entire lifecycle: `trial_started_at`, `trial_ends_at`, `trial_converted_at`, `trial_expired_at`.
+
+```php
+Tashil::subscription()->subscribe($user, $package, withTrial: true);
+Tashil::subscription()->convertTrial($sub);
+Tashil::subscription()->expireTrial($sub);
+```
+
+The `tashil:mark-trials-ending` job dispatches `TrialEnding` `tashil.trial.warn_days` (default 3) before expiry; `tashil:expire-trials` runs every 30 minutes and promotes overdue, unconverted trials to `Expired`.
+
+`isOnTrial()` is strict: status must be `OnTrial` AND `trial_ends_at` in the future. A cancelled-mid-trial subscription never reports as on-trial.
+
+See [docs/03-Trial-System.md](docs/03-Trial-System.md).
+
+---
+
+## Invoices
+
+Tahsil issues invoices on subscribe (non-trial) and renewal. The host charges and marks them paid.
+
+```php
+$invoice = Tashil::billing()->generateInvoice($subscription);
+// host charges via gateway, then:
+$invoice->markAsPaid();   // InvoiceObserver advances current_period_end
+                          // and dispatches SubscriptionRenewed + InvoicePaid
+```
+
+Invoice statuses: `draft`, `pending`, `paid`, `void`, `refunded`.
+
+Invoice numbers are generated by `tashil.invoice.generator` — default `InvoiceNumberGenerator` parses the format string `#-YYMMDD-NNNNNN` (e.g. `INV-260522-849021`).
+
+---
+
+## Scheduler
+
+Six idempotent commands. Auto-registered with `->onOneServer()`:
+
+| Command | Default cron | Purpose |
+|---|---|---|
+| `tashil:renew-subscriptions` | daily 00:05 | Issue renewal invoices when `current_period_end` has elapsed. |
+| `tashil:expire-subscriptions` | every 15 min | Promote out-of-window subs to `Expired`. |
+| `tashil:expire-trials` | every 30 min | Promote overdue, unconverted trials. |
+| `tashil:mark-trials-ending` | daily 07:55 | Dispatch `TrialEnding`. |
+| `tashil:reset-quotas` | daily 00:00 | Zero counters whose period has elapsed; advance window. |
+| `tashil:apply-pending-changes` | every 5 min | Apply scheduled package changes. |
+
+Override per-command cron via `tashil.schedule.overrides`. Set `tashil.schedule.enabled = false` to disable auto-wiring entirely.
+
+See [docs/04-Scheduler-Jobs.md](docs/04-Scheduler-Jobs.md).
+
+---
+
+## Events
+
+All events dispatch after `DB::afterCommit()` so listeners never see torn state (unless `tashil.events.async = false`).
+
+| Event | When |
+|---|---|
+| `SubscriptionCreated` | New subscription persisted. |
+| `SubscriptionCancelled` | `cancel()` — carries `immediate` flag + reason. |
+| `SubscriptionResumed` | Resume from `PendingCancellation`. |
+| `SubscriptionExpired` | `expire()` or the expire-subscriptions job. |
+| `SubscriptionSwitched` | `switchPlan()` — carries old + new sub and package. |
+| `SubscriptionPaused` / `SubscriptionUnpaused` | Pause / unpause. |
+| `SubscriptionRenewed` | Triggered by `InvoiceObserver` when an invoice is marked paid. |
+| `PendingChangeScheduled` / `PendingChangeApplied` | `scheduleDowngrade()` lifecycle. |
+| `TrialEnding` | `tashil:mark-trials-ending` — carries `daysRemaining`. |
+| `TrialConverted` | `convertTrial()`. |
+| `TrialExpired` | `expireTrial()` or the expire-trials job. |
+| `UsageReset` | Manual or scheduled reset. |
+| `UsageLimitWarning` | 80% threshold crossed (fired once per period). |
+| `InvoiceIssued` / `InvoicePaid` / `InvoiceVoided` / `InvoiceOverdue` | Invoice lifecycle. |
+
+Listen normally:
+
+```php
+Event::listen(SubscriptionExpired::class, fn ($e) => /* … */);
 ```
 
 ---
 
 ## Analytics & Reporting
 
-The `AnalyticsService` provides comprehensive subscription, revenue, and usage analytics. Access it via the facade:
+`Tashil::analytics()` provides live aggregates with cross-database queries (`tpetry/laravel-query-expressions`, no raw SQL):
 
 ```php
-$analytics = Tashil::analytics();
+Tashil::analytics()->dashboardSummary();
+Tashil::analytics()->packageAnalytics();
+Tashil::analytics()->calculateMRR();
+Tashil::analytics()->churnRate(days: 30);
+Tashil::analytics()->churnTrend(months: 12, windowDays: 30);   // 2 queries
+Tashil::analytics()->trialConversionRate();
+Tashil::analytics()->totalRevenue();
+Tashil::analytics()->revenueByPackage();
+Tashil::analytics()->revenueByPeriod(months: 12);
+Tashil::analytics()->getDailyUsage($sub, $featureId, days: 30);
 ```
 
-### Subscription Metrics
-
-```php
-// Total subscriptions (all statuses)
-$analytics->totalSubscriptionCount();        // 1,250
-
-// Active subscriptions only (active + on_trial)
-$analytics->activeSubscriptionCount();       // 980
-
-// Breakdown by status
-$analytics->subscriptionCountByStatus();
-// ['active' => 800, 'on_trial' => 180, 'cancelled' => 150, 'expired' => 120]
-
-// Subscribers per package
-$analytics->subscribersByPackage();
-// [['package_id' => 1, 'package_name' => 'Pro', 'count' => 600], ...]
-
-// Trial conversion rate (% of trials that became active)
-$analytics->trialConversionRate();           // 72.50
-
-// Subscription growth over time (chart data)
-$analytics->subscriptionGrowth(months: 12);
-// [['month' => '2025-01', 'count' => 85], ['month' => '2025-02', 'count' => 92], ...]
-```
-
-### Revenue Metrics
-
-```php
-// Monthly Recurring Revenue
-$analytics->calculateMRR();                  // 28,560.00
-
-// Average Revenue Per User
-$analytics->averageRevenuePerUser();         // 29.14
-
-// Lifetime total revenue
-$analytics->totalRevenue();                  // 342,720.00
-
-// Monthly revenue trend (chart data)
-$analytics->revenueByPeriod(months: 12);
-// [['month' => '2025-01', 'revenue' => 25430.00], ...]
-
-// Revenue per package
-$analytics->revenueByPackage();
-// [['package_id' => 1, 'package_name' => 'Pro', 'revenue' => 180000.00], ...]
-```
-
-### Invoice Metrics
-
-```php
-// Pending invoices
-$analytics->pendingInvoiceCount();           // 45
-
-// Overdue invoices (pending + past due date)
-$analytics->overdueInvoiceCount();           // 12
-```
-
-### Churn Metrics
-
-```php
-// Churn rate for last 30 days
-$analytics->churnRate(days: 30);             // 4.25
-
-// Churn trend over 12 months (chart data)
-$analytics->churnTrend(months: 12, windowDays: 30);
-// [['month' => '2025-01', 'churn_rate' => 3.80], ...]
-```
-
-### Usage Analytics
-
-```php
-// Daily usage for a feature over the last 30 days
-$analytics->getDailyUsage($subscription, featureId: 1, days: 30);
-// [['date' => '2025-02-01', 'total' => 245], ...]
-```
-
-### Dashboard Summary
-
-Get all KPIs in a single call:
-
-```php
-$summary = Tashil::analytics()->dashboardSummary();
-
-// Returns:
-// [
-//     'total_subscriptions'     => 1250,
-//     'active_subscriptions'    => 980,
-//     'subscriptions_by_status' => ['active' => 800, 'on_trial' => 180, ...],
-//     'mrr'                     => 28560.00,
-//     'arpu'                    => 29.14,
-//     'total_revenue'           => 342720.00,
-//     'churn_rate'              => 4.25,
-//     'trial_conversion_rate'   => 72.50,
-//     'pending_invoices'        => 45,
-//     'overdue_invoices'        => 12,
-//     'pending_invoices'        => 45,
-//     'overdue_invoices'        => 12,
-// ]
-```
-
-### Per-Package Analytics
-
-Get a detailed breakdown of metrics for each package:
-
-```php
-$packageStats = Tashil::analytics()->packageAnalytics();
-
-// Returns array of packages with stats:
-// [
-//     [
-//         'package_id'            => 1,
-//         'package_name'          => 'Pro Plan',
-//         'total_subscribers'     => 150,
-//         'active_subscribers'    => 120,
-//         'mrr'                   => 3599.80,
-//         'average_mrr'           => 29.99,
-//         'trial_conversion_rate' => 75.00,
-//         'cancelled_count'       => 10,
-//         'pending_invoices'      => 5,
-//         'overdue_invoices'      => 2,
-//         'total_revenue'         => 45000.00,
-//     ],
-//     ...
-// ]
-```
+For audit / point-in-time questions, walk the event log + feature snapshots — see [docs/05-Reporting-Data-Model.md](docs/05-Reporting-Data-Model.md).
 
 ---
 
 ## HasSubscriptions Trait
-
-Add subscription capabilities to any Eloquent model:
 
 ```php
 use Foysal50x\Tashil\Traits\HasSubscriptions;
@@ -650,346 +401,98 @@ class User extends Authenticatable
 }
 ```
 
-### Available Methods
+Surface:
 
 ```php
-// Subscription management
-$user->subscribe($package);
-$user->subscribe($package, withTrial: true);
-$user->cancelSubscription(immediate: false);
+// Lifecycle
+$user->subscribe($package, withTrial: false);
+$user->cancelSubscription(immediate: false, reason: '…');
 $user->resumeSubscription();
 $user->switchPlan($newPackage);
+$user->pauseSubscription();   $user->unpauseSubscription();
+$user->scheduleDowngrade($targetPackage);
 
-// Status checks
-$user->isSubscribed();                   // has any valid subscription
-$user->isSubscribedTo($package);         // subscribed to specific package (model or slug)
-$user->onPlan('pro');                    // alias for subscribedTo by slug
-$user->isOnTrial();                      // currently on trial
-$user->subscription();                   // get current valid subscription (always queries DB)
-$user->loadSubscription();               // get cached subscription (avoids redundant queries)
+// State
+$user->subscribed();           // true if Active / OnTrial / PendingCancellation (grace)
+$user->subscribedTo($pkg);     // by Package model or slug
+$user->onPlan('pro');
+$user->onTrial();              // strict
+$user->paused();
+$user->pendingChange();        // returns target Package or null
+$user->subscription();         // hits DB
+$user->loadSubscription();     // cached for request lifecycle
+$user->clearSubscriptionCache();
 
-// Feature access
-$user->hasFeature('dark-mode');          // boolean feature check
-$user->canUseFeature('api-calls');       // has access + within limits
-$user->featureValue('api-calls');        // get raw feature value
-$user->featureUsage('api-calls');        // current usage count
-$user->featureRemaining('api-calls');    // remaining allowance
-$user->useFeature('api-calls');          // increment and log usage
-$user->dailyUsageFor('api-calls', 30);  // daily usage breakdown for last N days
+// Features
+$user->hasFeature('dark-mode');
+$user->featureValue('api-calls');
+$user->featureUsage('api-calls');      // float
+$user->featureRemaining('api-calls');  // float|null (null = unlimited)
+$user->useFeature('api-calls', 1);
+$user->reportStorage('storage-gb', 12.5);
+$user->dailyUsageFor('api-calls', days: 30);
 
 // Invoices
-$user->invoices();                       // invoices relationship
-$user->allInvoices();                    // flattened collection of all invoices
-
-// Cache management
-$user->clearSubscriptionCache();         // force re-fetch on next access
+$user->invoices();             // Collection of all invoices across all subs
 ```
 
-> [!NOTE]
-> **Performance**: Methods like `hasFeature()`, `featureValue()`, `featureUsage()`, `featureRemaining()`, `dailyUsageFor()`, and `useFeature()` all use `loadSubscription()` internally, which caches the active subscription for the model's lifetime. This eliminates redundant queries when multiple methods are called on the same model instance. The cache is automatically cleared after `subscribe()`, `cancelSubscription()`, `resumeSubscription()`, and `switchPlan()`.
-
----
-
-## Events
-
-Tashil dispatches events that you can listen to in your application:
-
-### SubscriptionCreated
-
-Fired when a new subscription is created.
-
-```php
-use Foysal50x\Tashil\Events\SubscriptionCreated;
-
-class HandleNewSubscription
-{
-    public function handle(SubscriptionCreated $event): void
-    {
-        $subscription = $event->subscription;
-        // Send welcome email, provision resources, etc.
-    }
-}
-```
-
-### UsageLimitWarning
-
-Fired when feature usage crosses the 80% threshold.
-
-```php
-use Foysal50x\Tashil\Events\UsageLimitWarning;
-
-class HandleUsageWarning
-{
-    public function handle(UsageLimitWarning $event): void
-    {
-        $subscription = $event->subscription;
-        $feature      = $event->feature;
-        $usage        = $event->usage;   // current usage
-        $limit        = $event->limit;   // maximum allowed
-
-        // Notify user they're approaching their limit
-    }
-}
-```
+`loadSubscription()` caches the active subscription for the model instance — feature checks and usage operations all share the same row.
 
 ---
 
 ## Caching Architecture
 
-Tashil implements a **decorator-based caching layer** using the Repository pattern:
+Repository decorator pattern. The cache layer wraps the Eloquent repositories for catalog + aggregate reads; hot-mutating tables (`subscription_events`, `subscription_features`, `feature_usages`) bypass the cache entirely.
 
-```
+```text
 Service Layer
-    └── CacheRepository (decorator)
-            └── EloquentRepository (implementation)
+    └── CacheRepository (decorator, optional)
+            └── EloquentRepository
                     └── Database
 ```
 
-### How It Works
+Disable globally:
 
-- **Read operations** are cached with configurable TTL
-- **Write operations** automatically invalidate related cache entries
-- The cache layer can be **disabled entirely** via config
-- Aggregate values (active count, MRR, etc.) are selectively cached
-
-### Cache Keys
-
-| Key Pattern | Data |
-|-------------|------|
-| `subscription:{id}` | Single subscription |
-| `subscription:{Model}:{id}:valid` | Subscriber's valid subscription |
-| `subscription:aggregate:active_count` | Active subscription count |
-| `subscription:aggregate:mrr` | Monthly Recurring Revenue |
-| `subscription:aggregate:total_count` | Total subscription count |
-| `subscription:aggregate:count_by_status` | Status breakdown |
-| `subscription:aggregate:by_package` | Subscribers per package |
-| `subscription:aggregate:revenue_by_package` | Revenue per package |
-| `subscription:aggregate:dashboard_stats` | Batched dashboard KPIs |
-| `invoice:aggregate:pending_count` | Pending invoice count |
-| `invoice:aggregate:total_revenue` | Total revenue |
-
-### Disabling Cache
-
-Set in `config/tashil.php`:
-
-```php
-'cache' => [
-    'enabled' => false,
-],
-```
-
-Or in `.env`:
-
-```
+```env
 TASHIL_CACHE_ENABLED=false
 ```
 
+A dedicated Redis store named `tashil` is auto-registered so cache traffic is isolated from the host app's main store. Configure via `TASHIL_REDIS_*` env vars.
+
 ---
 
-## API Reference
+## Documentation
 
-### Tashil Facade
+Full design + reference:
 
-```php
-Tashil::subscription()  // → SubscriptionService
-Tashil::usage()          // → UsageService
-Tashil::analytics()      // → AnalyticsService
-Tashil::billing()        // → BillingService
-Tashil::feature($slug)   // → FeatureBuilder
-Tashil::package($slug)   // → PackageBuilder
+- [docs/01-DB-Schema.md](docs/01-DB-Schema.md) — every table with the ER diagram.
+- [docs/02-Feature-System.md](docs/02-Feature-System.md) — feature types, snapshots, counters, reset cadence.
+- [docs/03-Trial-System.md](docs/03-Trial-System.md) — trial lifecycle, conversion, expiry.
+- [docs/04-Scheduler-Jobs.md](docs/04-Scheduler-Jobs.md) — every command, cadence, idempotency.
+- [docs/05-Reporting-Data-Model.md](docs/05-Reporting-Data-Model.md) — analytics + point-in-time + replay.
+- [docs/06-Developer-Guide.md](docs/06-Developer-Guide.md) — layout, conventions, extension points.
+
+Cookbook-style examples:
+
+- [examples/01-Subscription-Management.md](examples/01-Subscription-Management.md)
+- [examples/02-Feature-Usage-Tracking.md](examples/02-Feature-Usage-Tracking.md)
+- [examples/03-Billing-and-Invoicing.md](examples/03-Billing-and-Invoicing.md)
+- [examples/04-Analytics.md](examples/04-Analytics.md)
+- [examples/05-Console-Commands.md](examples/05-Console-Commands.md)
+
+---
+
+## Testing
+
+```bash
+composer test
+# or
+./vendor/bin/pest
 ```
 
-### SubscriptionService
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `subscribe(Model $subscriber, Package $package, bool $withTrial = false)` | `Subscription` | Create subscription |
-| `cancel(Subscription $sub, bool $immediate = false, ?string $reason = null)` | `Subscription` | Cancel subscription |
-| `resume(Subscription $sub)` | `Subscription` | Resume cancelled subscription |
-| `switchPlan(Subscription $sub, Package $newPackage)` | `Subscription` | Switch to different package |
-
-### UsageService
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `increment(Subscription $sub, string $featureSlug, float $amount = 1)` | `bool` | Increment feature usage |
-| `check(Subscription $sub, string $featureSlug, float $amount = 1)` | `bool` | Check if feature can be used |
-| `resetUsage(Subscription $sub, string $featureSlug)` | `bool` | Reset single feature usage |
-| `resetAllUsage(Subscription $sub)` | `void` | Reset all feature usage |
-
-### BillingService
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `generateInvoice(Subscription $sub, ?float $amount = null)` | `Invoice` | Generate invoice |
-
-### AnalyticsService
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `dashboardSummary()` | `array` | All-in-one KPI summary |
-| `packageAnalytics()` | `array` | Detailed stats per package |
-| `calculateMRR()` | `float` | Monthly Recurring Revenue |
-| `churnRate(int $days)` | `float` | Churn percentage |
-| `trialConversionRate()` | `float` | Trial conversion percentage |
-| `totalSubscriptionCount()` | `int` | All subscriptions |
-| `activeSubscriptionCount()` | `int` | Active + on-trial |
-| `subscriptionCountByStatus()` | `array` | Count per status |
-| `subscribersByPackage()` | `array` | Distribution per package |
-| `trialConversionRate()` | `float` | Trial→active % |
-| `subscriptionGrowth(int $months = 12)` | `array` | Monthly growth data |
-| `calculateMRR()` | `float` | Monthly Recurring Revenue |
-| `averageRevenuePerUser()` | `float` | ARPU |
-| `totalRevenue()` | `float` | Lifetime revenue |
-| `revenueByPeriod(int $months = 12)` | `array` | Monthly revenue trend |
-| `revenueByPackage()` | `array` | Revenue per package |
-| `pendingInvoiceCount()` | `int` | Pending invoices |
-| `overdueInvoiceCount()` | `int` | Overdue invoices |
-| `churnRate(int $days = 30)` | `float` | Churn % |
-| `churnTrend(int $months = 12, int $windowDays = 30)` | `array` | Churn over time |
-| `getDailyUsage(Subscription $sub, int $featureId, int $days = 30)` | `array` | Daily usage data |
-| `getDailyUsage(Subscription $sub, int $featureId, int $days = 30)` | `array` | Daily usage data |
-| `dashboardSummary()` | `array` | All KPIs in one call |
-| `packageAnalytics()` | `array` | Detailed stats per package |
-
-### FeatureBuilder
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `name(string $name)` | `self` | Set display name |
-| `description(string $desc)` | `self` | Set description |
-| `boolean()` | `self` | Set type to boolean |
-| `limit()` | `self` | Set type to limit |
-| `consumable()` | `self` | Set type to consumable |
-| `type(FeatureType $type)` | `self` | Set type explicitly |
-| `active(bool $active = true)` | `self` | Set active status |
-| `inactive()` | `self` | Mark as inactive |
-| `sortOrder(int $order)` | `self` | Set display order |
-| `metadata(array $data)` | `self` | Attach metadata |
-| `create()` | `Feature` | Persist to database |
-| `createOrUpdate()` | `Feature` | Upsert by slug |
-
-### PackageBuilder
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `name(string $name)` | `self` | Set display name |
-| `description(string $desc)` | `self` | Set description |
-| `price(float $price)` | `self` | Set price |
-| `originalPrice(float $price)` | `self` | Set original/strike-through price |
-| `currency(string $currency)` | `self` | Set currency |
-| `monthly()` | `self` | Bill monthly |
-| `quarterly()` | `self` | Bill quarterly |
-| `yearly()` | `self` | Bill yearly |
-| `lifetime()` | `self` | One-time payment |
-| `billingPeriod(Period $period, int $interval = 1)` | `self` | Custom billing cycle |
-| `trialDays(int $days)` | `self` | Set trial duration |
-| `featured(bool $featured = true)` | `self` | Mark as featured |
-| `sortOrder(int $order)` | `self` | Set display order |
-| `metadata(array $data)` | `self` | Attach metadata |
-| `feature(Feature\|int $feature, ...)` | `self` | Attach single feature |
-| `features(array $features)` | `self` | Attach multiple features |
-| `create()` | `Package` | Persist to database |
-| `createOrUpdate()` | `Package` | Upsert by slug |
-
-### Eloquent Models
-
-#### Subscription
-
-| Relationship | Type | Target |
-|-------------|------|--------|
-| `package()` | BelongsTo | `Package` |
-| `items()` | HasMany | `SubscriptionItem` |
-| `usageLogs()` | HasMany | `UsageLog` |
-| `invoices()` | HasMany | `Invoice` |
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `isActive()` | `bool` | Status is Active |
-| `isOnTrial()` | `bool` | Status is OnTrial |
-| `isCancelled()` | `bool` | Status is Cancelled |
-| `isExpired()` | `bool` | Status is Expired |
-| `isPastDue()` | `bool` | Status is PastDue |
-| `isValid()` | `bool` | Active or OnTrial |
-
-#### Package
-
-| Relationship | Type | Target |
-|-------------|------|--------|
-| `features()` | BelongsToMany | `Feature` |
-| `subscriptions()` | HasMany | `Subscription` |
-
-| Scope | Description |
-|-------|-------------|
-| `active()` | Only active packages |
-| `featured()` | Only featured packages |
-| `ordered()` | Ordered by sort_order |
-
-#### Invoice
-
-| Relationship | Type | Target |
-|-------------|------|--------|
-| `subscription()` | BelongsTo | `Subscription` |
-| `transactions()` | HasMany | `Transaction` |
-
-| Method | Description |
-|--------|-------------|
-| `markAsPaid()` | Set status to Paid |
-| `markAsVoid()` | Set status to Void |
-
-#### SubscriptionItem
-
-| Method | Return | Description |
-|--------|--------|-------------|
-| `isOverLimit()` | `bool` | Usage exceeds value |
-| `remainingUsage()` | `float` | Value minus usage |
-| `usagePercentage()` | `float` | Usage as % of value |
+The suite covers subscription lifecycle, grace cancellation, EventStore monotonicity + idempotency + immutability, atomic usage with race rejection, trial transitions, scheduled jobs, analytics, and the trait surface. 211 tests / 550 assertions at the time of writing.
 
 ---
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TASHIL_DB_CONNECTION` | `null` | Database connection |
-| `TASHIL_CURRENCY` | `USD` | Default currency |
-| `TASHIL_REDIS_HOST` | `REDIS_HOST` / `127.0.0.1` | Redis host |
-| `TASHIL_REDIS_PASSWORD` | `REDIS_PASSWORD` / `null` | Redis password |
-| `TASHIL_REDIS_PORT` | `REDIS_PORT` / `6379` | Redis port |
-| `TASHIL_REDIS_DB` | `5` | Redis database index |
-| `TASHIL_CACHE_PREFIX` | `tashil_cache:` | Cache key prefix |
-| `TASHIL_CACHE_ENABLED` | `true` | Enable/disable caching |
-
----
-
-## Database Schema
-
-Tashil creates the following tables (all names are configurable):
-
-```
-tashil_packages
-tashil_features
-tashil_package_feature      (pivot)
-tashil_subscriptions
-tashil_subscription_items
-tashil_usage_logs
-tashil_invoices
-tashil_transactions
-```
-
-The `subscriptions` table uses a polymorphic `subscriber_type` / `subscriber_id` pattern, so any Eloquent model can be a subscriber.
-
----
-
-## Examples
-
-For more detailed examples and usage scenarios, check the [examples/](examples/) directory:
-
-- [Subscription Management](examples/01-Subscription-Management.md)
-- [Feature Usage Tracking](examples/02-Feature-Usage-Tracking.md)
-- [Billing and Invoicing](examples/03-Billing-and-Invoicing.md)
-- [Analytics](examples/04-Analytics.md)
-- [Console Commands](examples/05-Console-Commands.md)
 
 ## License
 

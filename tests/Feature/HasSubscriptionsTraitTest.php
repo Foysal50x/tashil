@@ -41,10 +41,10 @@ it('subscribes via trait', function () {
 
 it('checks subscribed status via trait', function () {
     $this->user->subscribe($this->package);
-    
+
     // Check database
     expect($this->user->subscriptions()->count())->toBe(1);
-    
+
     expect($this->user->subscribed())->toBeTrue();
 });
 
@@ -95,11 +95,11 @@ it('gets feature value via trait', function () {
 it('gets feature usage via trait', function () {
     $this->user->subscribe($this->package);
 
-    expect($this->user->featureUsage('api-requests'))->toBe(0);
+    expect($this->user->featureUsage('api-requests'))->toBe(0.0);
 
     $this->user->useFeature('api-requests', 50);
 
-    expect($this->user->featureUsage('api-requests'))->toBe(50);
+    expect($this->user->featureUsage('api-requests'))->toBe(50.0);
 });
 
 it('gets feature remaining via trait', function () {
@@ -165,7 +165,7 @@ it('gets all invoices via trait', function () {
     app('tashil')->billing()->generateInvoice($this->user->subscription());
     app('tashil')->billing()->generateInvoice($this->user->subscription());
 
-    $invoices = $this->user->allInvoices();
+    $invoices = $this->user->invoices();
     expect($invoices)->toHaveCount(2);
 });
 

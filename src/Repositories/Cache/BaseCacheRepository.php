@@ -9,7 +9,7 @@ use Foysal50x\Tashil\Managers\CacheManager;
 abstract class BaseCacheRepository
 {
     protected array $cacheTags;
-    
+
     public function __construct(
         protected readonly mixed $repository,
         protected readonly CacheManager $cacheManager,
@@ -25,6 +25,7 @@ abstract class BaseCacheRepository
     protected function generateCachePrefix(): string
     {
         $className = class_basename($this->repository);
+
         return strtolower(str_replace('Repository', '', $className));
     }
 
@@ -34,15 +35,16 @@ abstract class BaseCacheRepository
     protected function getCacheKey(string $method, array $args = []): string
     {
         $key = $this->generateCachePrefix() . ':' . $method;
-        
-        if (!empty($args)) {
+
+        if (! empty($args)) {
             $key .= ':' . md5(serialize($args));
         }
-        
+
         return $key;
     }
 
-    protected function remember(string $key, callable $callback): mixed {
+    protected function remember(string $key, callable $callback): mixed
+    {
         if (method_exists($this->cacheManager->store(), 'tags')) {
             return $this->cacheManager->tags($this->cacheTags)->remember($key, $this->cacheTtl, $callback);
         }
@@ -70,6 +72,4 @@ abstract class BaseCacheRepository
             $this->cacheManager->flush();
         }
     }
-
-
 }

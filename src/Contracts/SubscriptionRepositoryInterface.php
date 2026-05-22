@@ -4,6 +4,7 @@ namespace Foysal50x\Tashil\Contracts;
 
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 
 interface SubscriptionRepositoryInterface
@@ -38,12 +39,38 @@ interface SubscriptionRepositoryInterface
      */
     public function findCancelledResumable(Model $subscriber): ?Subscription;
 
-    public function getExpiringSubscriptions(\DateTimeInterface $date, ?bool $autoRenew = null): \Illuminate\Database\Eloquent\Collection;
+    /**
+     * Subscriptions whose current_period_end has elapsed and whose
+     * status still allows renewal (Active, OnTrial after conversion).
+     */
+    public function dueForRenewal(\DateTimeInterface $moment): Collection;
 
     /**
-     * Create subscription items (features) from a package.
+     * Subscriptions whose access window has expired — Active rows past
+     * ends_at, or PendingCancellation rows past cancellation_effective_at.
      */
-    public function syncFeatureItems(Subscription $subscription, Package $package): void;
+    public function dueForExpiration(\DateTimeInterface $moment): Collection;
+
+    /**
+     * Trials whose trial_ends_at has elapsed without conversion.
+     */
+    public function dueForTrialExpiration(\DateTimeInterface $moment): Collection;
+
+    /**
+     * Active trials ending within $warnDays.
+     */
+    public function trialsEndingSoon(\DateTimeInterface $now, int $warnDays): Collection;
+
+    /**
+     * Subscriptions whose pending_change_at has elapsed.
+     */
+    public function dueForPendingChange(\DateTimeInterface $moment): Collection;
+
+    /**
+     * Create the subscription_features snapshot and feature_usages counter
+     * rows from a package's feature pivot.
+     */
+    public function syncFeatures(Subscription $subscription, Package $package): void;
 
     /**
      * Count active subscriptions (active + on_trial).

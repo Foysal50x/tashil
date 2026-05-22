@@ -3,6 +3,7 @@
 use Foysal50x\Tashil\Enums\Period;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
+use Foysal50x\Tashil\Models\Subscription;
 
 beforeEach(function () {
     $this->package = Package::create([
@@ -81,7 +82,7 @@ it('has features relationship via pivot', function () {
 });
 
 it('has subscriptions relationship', function () {
-    expect($this->package->subscriptions()->getRelated())->toBeInstanceOf(\Foysal50x\Tashil\Models\Subscription::class);
+    expect($this->package->subscriptions()->getRelated())->toBeInstanceOf(Subscription::class);
 });
 
 it('uses soft deletes', function () {

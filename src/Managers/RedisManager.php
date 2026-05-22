@@ -2,8 +2,8 @@
 
 namespace Foysal50x\Tashil\Managers;
 
-use Illuminate\Support\Facades\Redis;
 use Illuminate\Redis\Connections\Connection;
+use Illuminate\Support\Facades\Redis;
 
 class RedisManager
 {

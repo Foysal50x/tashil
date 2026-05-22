@@ -1,5 +1,7 @@
 <?php
 
+use Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator;
+
 return [
     /*
     |--------------------------------------------------------------------------
@@ -26,15 +28,78 @@ return [
         // Keys represent the internal reference, values are the actual table names (without prefix).
         // Change these only if you have naming conflicts in your database.
         'tables' => [
-            'packages'           => 'packages',
-            'features'           => 'features',
-            'package_feature'    => 'package_feature',
-            'subscriptions'      => 'subscriptions',
-            'subscription_items' => 'subscription_items',
-            'usage_logs'         => 'usage_logs',
-            'invoices'           => 'invoices',
-            'transactions'       => 'transactions',
+            'packages'              => 'packages',
+            'features'              => 'features',
+            'package_feature'       => 'package_feature',
+            'subscriptions'         => 'subscriptions',
+            'subscription_features' => 'subscription_features',
+            'feature_usages'        => 'feature_usages',
+            'usage_logs'            => 'usage_logs',
+            'subscription_events'   => 'subscription_events',
+            'invoices'              => 'invoices',
+            'transactions'          => 'transactions',
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Trial
+    |--------------------------------------------------------------------------
+    |
+    | warn_days  : how many days before trial_ends_at to dispatch TrialEnding.
+    | grace_days : optional grace window after trial expires (host enforces).
+    |
+    */
+    'trial' => [
+        'warn_days'  => env('TASHIL_TRIAL_WARN_DAYS', 3),
+        'grace_days' => env('TASHIL_TRIAL_GRACE_DAYS', 0),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Renewal
+    |--------------------------------------------------------------------------
+    |
+    | on_pending_invoice : policy when an unpaid invoice already exists at
+    | renewal time. One of:
+    |   - 'cancel'        (default; preserves the existing tashil behavior)
+    |   - 'skip'          (do nothing, retry next run)
+    |   - 'extend_grace'  (push current_period_end by grace_days and try again)
+    | grace_days         : extension applied when policy is 'extend_grace'.
+    |
+    */
+    'renewal' => [
+        'on_pending_invoice' => env('TASHIL_RENEWAL_ON_PENDING_INVOICE', 'cancel'),
+        'grace_days'         => env('TASHIL_RENEWAL_GRACE_DAYS', 3),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Scheduler
+    |--------------------------------------------------------------------------
+    |
+    | enabled   : set false to skip auto-registration; you'll need to wire
+    |             commands manually in your app's Kernel.
+    | overrides : map of command name -> cron expression that overrides the
+    |             default cadence per command.
+    |
+    */
+    'schedule' => [
+        'enabled'   => env('TASHIL_SCHEDULE_ENABLED', true),
+        'overrides' => [],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Events
+    |--------------------------------------------------------------------------
+    |
+    | async : when true, domain events are dispatched after the DB commit
+    |         using DB::afterCommit() so listeners don't see torn state.
+    |
+    */
+    'events' => [
+        'async' => env('TASHIL_EVENTS_ASYNC', true),
     ],
 
     /*
@@ -59,7 +124,7 @@ return [
     'invoice' => [
         'prefix'    => 'INV',
         'format'    => '#-YYMMDD-NNNNNN', // #=Prefix, YY/MM/DD=Date, N=Digit, S=Letter, A=AlphaNumeric
-        'generator' => Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator::class,
+        'generator' => InvoiceNumberGenerator::class,
     ],
 
     /*

@@ -3,8 +3,8 @@
 namespace Foysal50x\Tashil\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Str;
 
 abstract class BaseModel extends Model
 {
@@ -17,9 +17,9 @@ abstract class BaseModel extends Model
     {
         // Resolve table name from config based on a simple convention:
         // The model class name is mapped to a config key in tashil.database.tables.
-        // e.g. Package → 'packages', SubscriptionItem → 'subscription_items'
+        // e.g. Package → 'packages', SubscriptionEvent → 'subscription_events'
         $baseName = class_basename(static::class);
-        $snakeKey = \Illuminate\Support\Str::snake(\Illuminate\Support\Str::pluralStudly($baseName));
+        $snakeKey = Str::snake(Str::pluralStudly($baseName));
 
         $configKey = "tashil.database.tables.{$snakeKey}";
         $configured = Config::get($configKey);

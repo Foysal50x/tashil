@@ -8,7 +8,7 @@ class InvoiceNumberGenerator
 {
     /**
      * Generate a new invoice number based on configuration.
-     * 
+     *
      * Format tokens:
      * - #: Prefix
      * - YY: Year (2 digits)
@@ -33,7 +33,7 @@ class InvoiceNumberGenerator
         return str_replace(
             ['#', 'YY', 'MM', 'DD'],
             [$prefix, now()->format('y'), now()->format('m'), now()->format('d')],
-            $processed
+            $processed,
         );
     }
 
@@ -49,13 +49,13 @@ class InvoiceNumberGenerator
             $char = $format[$i];
 
             $result .= match ($char) {
-                'N' => (string) mt_rand(0, 9),
-                'S' => chr(rand(65, 90)), // A-Z
-                'A' => strtoupper(Str::random(1)), // Alphanumeric
+                'N'     => (string) mt_rand(0, 9),
+                'S'     => chr(rand(65, 90)), // A-Z
+                'A'     => strtoupper(Str::random(1)), // Alphanumeric
                 default => $char,
             };
         }
-        
+
         return $result;
     }
 }

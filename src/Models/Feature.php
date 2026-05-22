@@ -3,6 +3,7 @@
 namespace Foysal50x\Tashil\Models;
 
 use Foysal50x\Tashil\Enums\FeatureType;
+use Foysal50x\Tashil\Enums\ResetPeriod;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -16,10 +17,11 @@ class Feature extends BaseModel
     protected $guarded = [];
 
     protected $casts = [
-        'type'       => FeatureType::class,
-        'is_active'  => 'boolean',
-        'sort_order' => 'integer',
-        'metadata'   => 'array',
+        'type'         => FeatureType::class,
+        'reset_period' => ResetPeriod::class,
+        'is_active'    => 'boolean',
+        'sort_order'   => 'integer',
+        'metadata'     => 'array',
     ];
 
     // ── Relationships ────────────────────────────────────────────
@@ -30,7 +32,7 @@ class Feature extends BaseModel
             Package::class,
             Config::get('tashil.database.prefix', 'tashil_') . Config::get('tashil.database.tables.package_feature', 'package_feature'),
             'feature_id',
-            'package_id'
+            'package_id',
         )->withPivot(['value', 'is_available', 'sort_order'])->withTimestamps();
     }
 

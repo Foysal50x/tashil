@@ -9,11 +9,17 @@ use Foysal50x\Tashil\Models\Feature;
 class FeatureBuilder
 {
     protected string $slug;
+
     protected string $name;
+
     protected ?string $description = null;
+
     protected FeatureType $type = FeatureType::Boolean;
+
     protected bool $isActive = true;
+
     protected int $sortOrder = 0;
+
     protected ?array $metadata = null;
 
     public function __construct(string $slug)
@@ -112,7 +118,7 @@ class FeatureBuilder
     {
         return $this->repo()->updateOrCreate(
             ['slug' => $this->slug],
-            $this->toArray()
+            $this->toArray(),
         );
     }
 

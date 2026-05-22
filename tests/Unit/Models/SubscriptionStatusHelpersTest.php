@@ -48,7 +48,7 @@ it('detects past due subscription', function () {
     expect($subscription->isValid())->toBeFalse();
 });
 
-it('detects expired subscription by past ends_at date', function () {
+it('isActive is false when ends_at is past', function () {
     $subscription = Subscription::create([
         'subscriber_type' => get_class($this->user),
         'subscriber_id'   => $this->user->id,
@@ -58,14 +58,35 @@ it('detects expired subscription by past ends_at date', function () {
         'ends_at'         => now()->subDay(),
     ]);
 
-    // Active status but ends_at is past — isActive() should be false
     expect($subscription->isActive())->toBeFalse();
-    // isExpired() checks: status is expired OR (ends_at past AND not cancelled)
-    expect($subscription->isExpired())->toBeTrue();
 });
 
-it('detects on trial via trial_ends_at even with active status', function () {
-    $subscription = Subscription::create([
+it('isExpired requires explicit Expired status', function () {
+    $stillActiveButPastEnd = Subscription::create([
+        'subscriber_type' => get_class($this->user),
+        'subscriber_id'   => $this->user->id,
+        'package_id'      => $this->package->id,
+        'status'          => SubscriptionStatus::Active,
+        'starts_at'       => now()->subMonths(2),
+        'ends_at'         => now()->subDay(),
+    ]);
+
+    expect($stillActiveButPastEnd->isExpired())->toBeFalse();
+
+    $expired = Subscription::create([
+        'subscriber_type' => get_class($this->user),
+        'subscriber_id'   => $this->user->id,
+        'package_id'      => $this->package->id,
+        'status'          => SubscriptionStatus::Expired,
+        'starts_at'       => now()->subMonths(2),
+        'ends_at'         => now()->subDay(),
+    ]);
+
+    expect($expired->isExpired())->toBeTrue();
+});
+
+it('isOnTrial requires OnTrial status AND future trial_ends_at', function () {
+    $activeWithFutureTrial = Subscription::create([
         'subscriber_type' => get_class($this->user),
         'subscriber_id'   => $this->user->id,
         'package_id'      => $this->package->id,
@@ -75,42 +96,66 @@ it('detects on trial via trial_ends_at even with active status', function () {
         'trial_ends_at'   => now()->addDays(7),
     ]);
 
-    // isOnTrial() checks status == OnTrial OR trial_ends_at is future
-    expect($subscription->isOnTrial())->toBeTrue();
-    expect($subscription->isValid())->toBeTrue();
-});
+    expect($activeWithFutureTrial->isOnTrial())->toBeFalse();
 
-it('detects cancelled via cancelled_at even with different status', function () {
-    $subscription = Subscription::create([
+    $onTrial = Subscription::create([
         'subscriber_type' => get_class($this->user),
         'subscriber_id'   => $this->user->id,
         'package_id'      => $this->package->id,
-        'status'          => SubscriptionStatus::Active,
+        'status'          => SubscriptionStatus::OnTrial,
+        'starts_at'       => now(),
+        'ends_at'         => now()->addMonth(),
+        'trial_ends_at'   => now()->addDays(7),
+    ]);
+
+    expect($onTrial->isOnTrial())->toBeTrue();
+});
+
+it('isCancelled requires explicit Cancelled status', function () {
+    $graceCancelled = Subscription::create([
+        'subscriber_type' => get_class($this->user),
+        'subscriber_id'   => $this->user->id,
+        'package_id'      => $this->package->id,
+        'status'          => SubscriptionStatus::PendingCancellation,
         'starts_at'       => now(),
         'ends_at'         => now()->addMonth(),
         'cancelled_at'    => now(),
     ]);
 
-    // isCancelled() checks status == Cancelled OR cancelled_at is not null
-    expect($subscription->isCancelled())->toBeTrue();
-});
+    // PendingCancellation is not Cancelled — user still has access during grace.
+    expect($graceCancelled->isCancelled())->toBeFalse();
+    expect($graceCancelled->isPendingCancellation())->toBeTrue();
+    expect($graceCancelled->isValid())->toBeTrue();
 
-it('not expired returns false for non-suspended non-past status', function () {
-    $subscription = Subscription::create([
+    $cancelled = Subscription::create([
         'subscriber_type' => get_class($this->user),
         'subscriber_id'   => $this->user->id,
         'package_id'      => $this->package->id,
-        'status'          => SubscriptionStatus::Suspended,
+        'status'          => SubscriptionStatus::Cancelled,
+        'starts_at'       => now(),
+        'ends_at'         => now(),
+        'cancelled_at'    => now(),
+    ]);
+
+    expect($cancelled->isCancelled())->toBeTrue();
+});
+
+it('paused is a distinct state', function () {
+    $paused = Subscription::create([
+        'subscriber_type' => get_class($this->user),
+        'subscriber_id'   => $this->user->id,
+        'package_id'      => $this->package->id,
+        'status'          => SubscriptionStatus::Paused,
         'starts_at'       => now(),
         'ends_at'         => now()->addMonth(),
     ]);
 
-    expect($subscription->isSuspended())->toBeTrue();
-    expect($subscription->isPastDue())->toBeFalse();
-    expect($subscription->isExpired())->toBeFalse();
+    expect($paused->isPaused())->toBeTrue();
+    expect($paused->isActive())->toBeFalse();
+    expect($paused->isValid())->toBeFalse();
 });
 
-it('active with null ends_at is valid', function () {
+it('active with null ends_at is valid (lifetime)', function () {
     $subscription = Subscription::create([
         'subscriber_type' => get_class($this->user),
         'subscriber_id'   => $this->user->id,

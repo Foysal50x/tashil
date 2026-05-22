@@ -1,11 +1,9 @@
 <?php
 
 use Foysal50x\Tashil\Enums\FeatureType;
-use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
-use Foysal50x\Tashil\Models\SubscriptionItem;
 
 beforeEach(function () {
     $this->loadMigrationsFrom(__DIR__ . '/../Fixtures/create_users_table.php');
@@ -101,7 +99,7 @@ it('returns null for featureValue when not subscribed', function () {
 });
 
 it('returns zero for featureUsage when not subscribed', function () {
-    expect($this->user->featureUsage('api-requests'))->toBe(0);
+    expect($this->user->featureUsage('api-requests'))->toBe(0.0);
 });
 
 it('returns null for featureRemaining when not subscribed', function () {

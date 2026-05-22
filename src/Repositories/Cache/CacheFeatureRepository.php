@@ -25,7 +25,7 @@ class CacheFeatureRepository extends BaseCacheRepository implements FeatureRepos
         $result = $this->repository->create($data);
         $this->forget("feature:{$result->id}");
         $this->forget("feature:{$result->slug}");
-        $this->forget("features:all");
+        $this->forget('features:all');
 
         return $result;
     }
