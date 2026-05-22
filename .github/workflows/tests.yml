@@ -97,7 +97,7 @@ jobs:
             echo "pest_laravel=^3.0" >> $GITHUB_OUTPUT
           elif [[ "${{ matrix.laravel }}" == "13.*" ]]; then
             echo "testbench=^11.0" >> $GITHUB_OUTPUT
-            echo "collision=^9.0" >> $GITHUB_OUTPUT
+            echo "collision=^8.0" >> $GITHUB_OUTPUT
             echo "pest=^4.0" >> $GITHUB_OUTPUT
             echo "pest_laravel=^4.0" >> $GITHUB_OUTPUT
           fi
