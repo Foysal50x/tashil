@@ -32,6 +32,16 @@ interface FeatureUsageRepositoryInterface
     public function dueForReset(\DateTimeInterface $now): Collection;
 
     /**
+     * Stream due-for-reset rows in chunks of $chunkSize. The callback
+     * receives each chunk as a Collection. Used by the Resetter to
+     * batch many rows under one transaction without loading everything
+     * into memory.
+     *
+     * @param  callable(Collection<int, FeatureUsage>): void  $callback
+     */
+    public function chunkDueForReset(\DateTimeInterface $now, int $chunkSize, callable $callback): void;
+
+    /**
      * Set absolute usage (used for storage-style features).
      *
      * @return float the new usage value.

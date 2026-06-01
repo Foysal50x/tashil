@@ -69,6 +69,7 @@ trial.ending                  (payload: days_remaining)
 trial.converted
 trial.expired
 usage.reset                   (payload: feature_id, previous_usage)
+usage.metered_charged         (payload: feature_id, units, unit_price, amount, currency)
 ```
 
 Reading the log:

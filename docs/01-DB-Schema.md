@@ -184,7 +184,7 @@ Catalog of feature definitions independent of any plan.
 | `id` | BIGINT PK | |
 | `slug` | VARCHAR UNIQUE | Stable identifier used in code. |
 | `name`, `description` | VARCHAR / TEXT NULL | |
-| `type` | VARCHAR | `FeatureType` enum: `boolean`, `limit`, `consumable`, `enum`. |
+| `type` | VARCHAR | `FeatureType` enum: `boolean`, `limit`, `consumable`, `enum`, `metered`. |
 | `reset_period` | VARCHAR | `ResetPeriod` enum: `never`, `daily`, `weekly`, `monthly`, `yearly`. Drives `tashil:reset-quotas`. |
 | `is_active` | BOOL | Catalog kill-switch — when false, `UsageService::check()` refuses access globally. |
 | `sort_order` | INT | |
@@ -199,7 +199,7 @@ Per-plan feature configuration.
 |---|---|---|
 | `package_id` | BIGINT FK | cascadeOnDelete |
 | `feature_id` | BIGINT FK | cascadeOnDelete |
-| `value` | VARCHAR NULL | Limit amount or config value. Numeric values are parsed by tahsil as the limit; the raw string is also stored on the snapshot for boolean / enum features. |
+| `value` | VARCHAR NULL | Limit amount or config value. Numeric values are parsed by tahsil as the limit; the raw string is also stored on the snapshot for boolean / enum features. For `metered` features this holds the **unit price** (decimal string), not a cap. |
 | `is_available` | BOOL | If false, the feature is not synced on subscribe. |
 | `sort_order` | INT | |
 
@@ -272,7 +272,7 @@ Current usage value per (subscription, feature). Every change is also written to
 | `subscription_id` | BIGINT FK | cascadeOnDelete |
 | `feature_id` | BIGINT FK | cascadeOnDelete |
 | `usage` | DECIMAL(20,4) | Current counter. Fractional supported (storage GB, AI compute hours). |
-| `limit_value` | DECIMAL(20,4) NULL | Cached limit (null = unlimited). Cached on the counter so the atomic `UPDATE … WHERE usage + amount <= limit_value` is single-row. |
+| `limit_value` | DECIMAL(20,4) NULL | Cached limit (null = unlimited). Populated only for `limit` features; `boolean` / `consumable` / `enum` / `metered` counters carry `NULL`. Cached on the counter so the atomic `UPDATE … WHERE usage + amount <= limit_value` is single-row. |
 | `reset_period` | VARCHAR | Used by the reset job. |
 | `period_start` | TIMESTAMP NULL | |
 | `period_end` | TIMESTAMP NULL | The reset job zeroes counters whose `period_end <= now()` and advances the window anchored to the previous `period_end` (no drift if cron runs late). |

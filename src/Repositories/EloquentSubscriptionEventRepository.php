@@ -47,4 +47,11 @@ class EloquentSubscriptionEventRepository implements SubscriptionEventRepository
             ->orderBy('sequence_num')
             ->get();
     }
+
+    public function maxSequence(int $subscriptionId): int
+    {
+        return (int) SubscriptionEvent::query()
+            ->where('subscription_id', $subscriptionId)
+            ->max('sequence_num');
+    }
 }

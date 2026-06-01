@@ -2,6 +2,33 @@
 
 How to manage subscriptions with the `tahsil` package.
 
+## 0. Make your subscriber model Subscribable
+
+Any Eloquent model can be a subscriber by implementing the `Subscribable` contract and using the `HasSubscriptions` trait:
+
+```php
+use Foysal50x\Tashil\Contracts\Subscribable;
+use Foysal50x\Tashil\Traits\HasSubscriptions;
+
+class User extends Authenticatable implements Subscribable
+{
+    use HasSubscriptions;
+}
+```
+
+`implements Subscribable` is required — every library type-hint accepts `Subscribable`, not Eloquent's `Model`. The trait provides default implementations for `subscriptions`, `resolveSubscription`, `getSubscriberKey`, and `getSubscriberType`.
+
+Override `resolveSubscription()` if your model holds multiple subscriptions and you want to control which one represents "the active one":
+
+```php
+public function resolveSubscription(): ?Subscription
+{
+    return $this->subscriptions()->valid()
+        ->where('package_id', $this->currentWorkspace->preferredPackageId)
+        ->first();
+}
+```
+
 ## 1. Subscribe a user
 
 ```php
@@ -95,7 +122,47 @@ app('tashil')->subscription()->expireTrial($subscription);   // status: OnTrial 
 
 Scheduled jobs handle the unattended path: `tashil:expire-trials` and `tashil:mark-trials-ending`.
 
-## 9. Replay history
+## 9. Gate routes with middleware
+
+Three route middleware ship and auto-register:
+
+```php
+Route::middleware('subscribed')->group(fn () => /* requires a valid subscription */);
+Route::middleware('plan:pro')->group(fn () => /* requires the pro plan */);
+Route::middleware('feature:api-calls')->group(fn () => /* requires the api-calls feature */);
+```
+
+All three abort `403` on failure. They resolve the subscribable via `Tashil::resolveSubscribable()` — by default `auth()->user()`. For multi-tenant or team-based apps, override the resolver in `AppServiceProvider::boot`:
+
+```php
+use Foysal50x\Tashil\Facades\Tashil;
+
+Tashil::resolveSubscribableUsing(fn () => Team::current());
+```
+
+## 10. Gate views with Blade directives
+
+The same resolver powers four Blade conditional directives:
+
+```blade
+@subscribed
+    {{-- visible only if a valid subscription exists --}}
+@endsubscribed
+
+@plan('pro')
+    {{-- visible only on the pro plan --}}
+@endplan
+
+@feature('api-calls')
+    {{-- visible only when the feature check passes --}}
+@endfeature
+
+@onTrial
+    {{-- visible only when status==OnTrial AND trial_ends_at is in the future --}}
+@endonTrial
+```
+
+## 11. Replay history
 
 Every state transition is appended to the per-subscription event log with a monotonic `sequence_num`.
 

@@ -35,8 +35,6 @@ beforeEach(function () {
     $this->user = createUser();
 });
 
-// ── loadSubscription / clearSubscriptionCache ───────────────────────
-
 it('caches subscription on loadSubscription', function () {
     $subscription = app('tashil')->subscription()->subscribe($this->user, $this->package);
 
@@ -61,8 +59,6 @@ it('clears subscription cache', function () {
     expect($fresh)->toBeInstanceOf(Subscription::class);
 });
 
-// ── onTrial ─────────────────────────────────────────────────────────
-
 it('returns true for onTrial when subscribed with trial', function () {
     app('tashil')->subscription()->subscribe($this->user, $this->package, withTrial: true);
 
@@ -79,16 +75,12 @@ it('returns false for onTrial when not subscribed', function () {
     expect($this->user->onTrial())->toBeFalse();
 });
 
-// ── onPlan ──────────────────────────────────────────────────────────
-
 it('checks if subscribed to specific plan via onPlan', function () {
     app('tashil')->subscription()->subscribe($this->user, $this->package);
 
     expect($this->user->onPlan('pro-plan'))->toBeTrue();
     expect($this->user->onPlan('enterprise'))->toBeFalse();
 });
-
-// ── Feature access helpers (no subscription) ────────────────────────
 
 it('returns false for hasFeature when not subscribed', function () {
     expect($this->user->hasFeature('api-requests'))->toBeFalse();
@@ -106,8 +98,6 @@ it('returns null for featureRemaining when not subscribed', function () {
     expect($this->user->featureRemaining('api-requests'))->toBeNull();
 });
 
-// ── dailyUsageFor ───────────────────────────────────────────────────
-
 it('returns empty array for dailyUsageFor when not subscribed', function () {
     expect($this->user->dailyUsageFor('api-requests'))->toBe([]);
 });
@@ -118,13 +108,9 @@ it('returns empty array for dailyUsageFor when feature not found', function () {
     expect($this->user->dailyUsageFor('nonexistent-feature'))->toBe([]);
 });
 
-// ── useFeature without subscription ─────────────────────────────────
-
 it('returns false for useFeature when not subscribed', function () {
     expect($this->user->useFeature('api-requests'))->toBeFalse();
 });
-
-// ── cancelSubscription / resumeSubscription / switchPlan (no sub) ───
 
 it('returns null for cancelSubscription when not subscribed', function () {
     expect($this->user->cancelSubscription())->toBeNull();

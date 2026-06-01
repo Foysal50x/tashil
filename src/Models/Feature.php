@@ -24,8 +24,6 @@ class Feature extends BaseModel
         'metadata'     => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function packages(): BelongsToMany
     {
         return $this->belongsToMany(
@@ -36,8 +34,6 @@ class Feature extends BaseModel
         )->withPivot(['value', 'is_available', 'sort_order'])->withTimestamps();
     }
 
-    // ── Scopes ───────────────────────────────────────────────────
-
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
@@ -47,8 +43,6 @@ class Feature extends BaseModel
     {
         return $query->orderBy('sort_order');
     }
-
-    // ── Helpers ──────────────────────────────────────────────────
 
     public function isBoolean(): bool
     {
@@ -63,5 +57,10 @@ class Feature extends BaseModel
     public function isConsumable(): bool
     {
         return $this->type === FeatureType::Consumable;
+    }
+
+    public function isMetered(): bool
+    {
+        return $this->type === FeatureType::Metered;
     }
 }

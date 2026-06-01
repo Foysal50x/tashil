@@ -3,16 +3,16 @@
 namespace Foysal50x\Tashil\Repositories;
 
 use Carbon\Carbon;
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
+use Foysal50x\Tashil\Enums\FeatureType;
 use Foysal50x\Tashil\Enums\ResetPeriod;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Foysal50x\Tashil\Support\Query\DateFmt;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 use Tpetry\QueryExpressions\Function\Aggregate\Count;
 use Tpetry\QueryExpressions\Function\Aggregate\CountFilter;
 use Tpetry\QueryExpressions\Function\Aggregate\Sum;
@@ -48,19 +48,19 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
         return Subscription::find($id);
     }
 
-    public function findValidForSubscriber(Model $subscriber): ?Subscription
+    public function findValidForSubscriber(Subscribable $subscriber): ?Subscription
     {
-        return $subscriber->morphMany(Subscription::class, 'subscriber')
+        return $subscriber->subscriptions()
             ->valid()
             ->latest('starts_at')
             ->first();
     }
 
-    public function subscriberHasValidSubscription(Model $subscriber, Package|string|null $package = null): bool
+    public function subscriberHasValidSubscription(Subscribable $subscriber, Package|string|null $package = null): bool
     {
         $query = Subscription::query()
-            ->where('subscriber_type', $subscriber->getMorphClass())
-            ->where('subscriber_id', $subscriber->getKey())
+            ->where('subscriber_type', $subscriber->getSubscriberType())
+            ->where('subscriber_id', $subscriber->getSubscriberKey())
             ->valid();
 
         if ($package) {
@@ -73,9 +73,9 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
         return $query->exists();
     }
 
-    public function findCancelledResumable(Model $subscriber): ?Subscription
+    public function findCancelledResumable(Subscribable $subscriber): ?Subscription
     {
-        return $subscriber->morphMany(Subscription::class, 'subscriber')
+        return $subscriber->subscriptions()
             ->where('status', SubscriptionStatus::PendingCancellation)
             ->where(function ($q) {
                 $q->whereNull('cancellation_effective_at')
@@ -156,9 +156,7 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
 
             $value = $feature->pivot->value;
             $reset = $feature->reset_period ?? ResetPeriod::Never;
-            $isNumericLimit = is_numeric($value);
 
-            // Snapshot row (immutable).
             $subscription->subscriptionFeatures()->create([
                 'feature_id'    => $feature->id,
                 'feature_slug'  => $feature->slug,
@@ -169,15 +167,19 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 'superseded_at' => null,
             ]);
 
-            // Counter row (mutable). Only created for tracked features —
-            // boolean access doesn't need a counter, but we keep one for
-            // uniformity and so that resetAllUsage() works cleanly.
+            // Counter row. limit_value is set ONLY for Limit features —
+            // for Metered the pivot value holds unit_price, not a cap, so
+            // the counter stays unlimited and atomicIncrement always
+            // succeeds; the gate is the MeteredBilling charge.
             $periodEnd = EloquentFeatureUsageRepository::nextPeriodEnd($reset, $now, $now);
+            $limitValue = ($feature->type === FeatureType::Limit && is_numeric($value))
+                ? (float) $value
+                : null;
 
             $subscription->featureUsages()->create([
                 'feature_id'   => $feature->id,
                 'usage'        => 0,
-                'limit_value'  => $isNumericLimit ? (float) $value : null,
+                'limit_value'  => $limitValue,
                 'reset_period' => $reset,
                 'period_start' => $now,
                 'period_end'   => $periodEnd,

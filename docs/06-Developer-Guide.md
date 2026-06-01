@@ -33,33 +33,35 @@ Tahsil's own auto-registration (`tashil.schedule.enabled = true`) handles all ve
 src/
   Builders/           PackageBuilder, FeatureBuilder — fluent catalog construction
   Console/            Six scheduled commands
-  Contracts/          Repository interfaces — swap implementations freely
-  Enums/              SubscriptionStatus, FeatureType, ResetPeriod, UsageOperation,
-                      InvoiceStatus, TransactionStatus, Period
-  Events/             Subscription / Trial / Invoice / Usage domain events
+  Contracts/          Subscribable, MeteredBilling, repository interfaces
+  Enums/              SubscriptionStatus, FeatureType (incl. Metered), ResetPeriod,
+                      UsageOperation, InvoiceStatus, TransactionStatus, Period
+  Events/             Subscription / Trial / Invoice / Usage / Metered events
+  Exceptions/         MeteredBillingNotConfiguredException
   Facades/            Tashil facade
-  Http/               Reserved (no controllers ship by default)
+  Http/Middleware/    EnsureSubscribed, EnsurePlan, EnsureFeature
   Managers/           DatabaseManager, CacheManager
   Models/             Eloquent models incl. immutable SubscriptionEvent /
                       SubscriptionFeature / FeatureUsage / UsageLog
   Observers/          InvoiceObserver (auto-number + paid-handler),
                       TransactionObserver (auto-id when blank)
-  Providers/          TashilServiceProvider — registration + schedule wiring
+  Providers/          TashilServiceProvider — registration + middleware + schedule
   Repositories/       EloquentXRepository + Cache decorators
   Services/           SubscriptionService, UsageService, BillingService,
-                      AnalyticsService, EventStore, Resetter
+                      AnalyticsService, EventStore, Resetter,
+                      Providers/NullMeteredBilling
   Support/            DateFmt and friends
   Traits/             HasSubscriptions
-  Tashil.php          Service facade with sub-accessors
+  Tashil.php          Service facade with sub-accessors + resolveSubscribable
 
 database/
   factories/          Model factories used by the test suite
   migrations/         Single migration that creates all tables
 
 tests/
-  Feature/            Integration tests
+  Feature/            Integration tests (Metered, Middleware, SubscribableContract, ...)
   Unit/               Builder / Model / Enum tests
-  Fixtures/           User fixture for trait tests
+  Fixtures/           User fixture + FakeMeteredBilling for tests
 ```
 
 ## Layering
@@ -246,15 +248,115 @@ When recording transactions, pass the gateway-supplied id through (Stripe `ch_�
 ## Adding the trait to a model
 
 ```php
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Traits\HasSubscriptions;
 
-class User extends Authenticatable
+class User extends Authenticatable implements Subscribable
 {
     use HasSubscriptions;
 }
 ```
 
-That alone gives the model the full API documented in [examples/01-Subscription-Management.md](../examples/01-Subscription-Management.md) and [examples/02-Feature-Usage-Tracking.md](../examples/02-Feature-Usage-Tracking.md). Any Eloquent model can be a subscriber — `Team`, `Organization`, `Workspace`.
+The `implements Subscribable` is **required** — every library type-hint that takes a subscriber is `Subscribable`, not Eloquent's `Model`. The trait provides default implementations for all four interface methods (`subscriptions`, `resolveSubscription`, `getSubscriberKey`, `getSubscriberType`); you only need to override the ones you want to change.
+
+That gives the model the full API documented in [examples/01-Subscription-Management.md](../examples/01-Subscription-Management.md) and [examples/02-Feature-Usage-Tracking.md](../examples/02-Feature-Usage-Tracking.md). Any Eloquent model can be a subscriber — `Team`, `Organization`, `Workspace`.
+
+### Customising which subscription is "the active one"
+
+`HasSubscriptions::loadSubscription()` calls `resolveSubscription()` to decide which subscription to use for every feature / lifecycle / middleware check. Default = latest valid subscription. Override for multi-sub / tenant scenarios:
+
+```php
+class Team extends Model implements Subscribable
+{
+    use HasSubscriptions;
+
+    public function resolveSubscription(): ?Subscription
+    {
+        // Example: prefer the subscription tied to the team's current
+        // workspace rather than the most recently created one.
+        return $this->subscriptions()
+            ->valid()
+            ->where('package_id', $this->currentWorkspace->preferredPackageId())
+            ->first();
+    }
+}
+```
+
+### Resolving the subscribable for middleware / Blade directives
+
+Tahsil's middleware and helpers need to know which model represents "the current subscriber" — by default, the authenticated user. Override when it's a team, tenant, or any other model:
+
+```php
+// AppServiceProvider::boot
+use Foysal50x\Tashil\Facades\Tashil;
+
+Tashil::resolveSubscribableUsing(fn () => Team::current());
+```
+
+`Tashil::resolveSubscribable()` returns `null` when no resolver is registered and `auth()->user()` is unauthenticated, or when the resolved object doesn't implement `Subscribable`. The middleware treat both cases as "deny → 403".
+
+## Middleware
+
+Three route middleware ship with the package and auto-register on boot:
+
+| Alias | Class | Purpose |
+|---|---|---|
+| `subscribed` | `EnsureSubscribed` | Resolved subscribable has a currently valid subscription. |
+| `plan:{slug}` | `EnsurePlan` | Subscribed AND on the named package slug. |
+| `feature:{slug}` | `EnsureFeature` | Subscribed AND `UsageService::check` passes for the named feature. |
+
+```php
+Route::middleware('subscribed')->group(function () {
+    // any valid subscription
+});
+
+Route::middleware('plan:pro')->group(function () {
+    // Pro plan only
+});
+
+Route::middleware('feature:api-calls')->group(function () {
+    // requires the api-calls feature on the current snapshot
+});
+```
+
+All three abort with `403` on failure. Override aliases via `config('tashil.middleware.aliases')` when a name collides with an existing host alias.
+
+## Blade directives
+
+Four conditional directives are registered on boot. They go through the same `Tashil::resolveSubscribable()` resolver as the middleware, so a custom `resolveSubscribableUsing` callback affects views and routes uniformly.
+
+```blade
+@subscribed
+    {{-- valid subscription (Active / OnTrial / PendingCancellation in grace) --}}
+@endsubscribed
+
+@plan('pro')
+    {{-- subscribed AND on this package slug --}}
+@endplan
+
+@feature('api-calls')
+    {{-- UsageService::check passes for this feature on the current snapshot --}}
+@endfeature
+
+@onTrial
+    {{-- strict: status == OnTrial AND trial_ends_at in future --}}
+@endonTrial
+```
+
+All directives support `@else` and `@endX`. They degrade safely to `false` when no subscribable can be resolved (guest user, no override, or the resolved object doesn't implement `Subscribable`).
+
+## Metered billing
+
+`MeteredBilling` is the host-implemented bridge to the wallet / balance system that funds Metered features. Tashil's default binding is `NullMeteredBilling`, which throws on every call so misconfiguration fails loud.
+
+Two implementation patterns are supported with no flag to toggle between them — `UsageService::resolveMeteredBilling` checks each subscriber per consume:
+
+1. **Self-implementing model** — `class User implements Subscribable, MeteredBilling`. No container binding needed; the subscriber handles its own billing.
+2. **Standalone class** — bound via the service container. Suited to service-layered codebases or shared billing logic across subscriber types.
+
+Both patterns satisfy the same interface and trigger the same events. Hosts can mix them: one subscriber type self-implements, another delegates to the container binding — resolution is per-subscriber.
+
+See [02-Feature-System.md › Metered features](02-Feature-System.md#metered-features) for the full contract, both patterns side-by-side, and the idempotency requirements.
 
 ## Testing your integration
 

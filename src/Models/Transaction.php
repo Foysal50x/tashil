@@ -20,14 +20,10 @@ class Transaction extends BaseModel
         'metadata'        => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
     }
-
-    // ── Helpers ──────────────────────────────────────────────────
 
     public function isSuccessful(): bool
     {

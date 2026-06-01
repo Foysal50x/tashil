@@ -22,8 +22,6 @@ beforeEach(function () {
     $this->analytics = app(AnalyticsService::class);
 });
 
-// ── Subscription Count Metrics ──────────────────────────────────────
-
 it('returns total subscription count', function () {
     $user1 = createUser();
     $user2 = createUser();
@@ -116,8 +114,6 @@ it('returns subscription count by status', function () {
     expect($result[SubscriptionStatus::Active->value])->toBe(2);
 });
 
-// ── Subscribers by Package ──────────────────────────────────────────
-
 it('returns subscribers grouped by package', function () {
     $user = createUser();
 
@@ -137,8 +133,6 @@ it('returns subscribers grouped by package', function () {
     expect($result[0]['package_name'])->toBe('Pro Monthly');
     expect($result[0]['count'])->toBe(1);
 });
-
-// ── Trial Conversion Rate ───────────────────────────────────────────
 
 it('returns trial conversion rate', function () {
     $user1 = createUser();
@@ -185,8 +179,6 @@ it('returns zero trial conversion rate when no trials exist', function () {
     expect($this->analytics->trialConversionRate())->toBe(0.0);
 });
 
-// ── Subscription Growth ─────────────────────────────────────────────
-
 it('returns subscription growth per period', function () {
     $user = createUser();
 
@@ -205,8 +197,6 @@ it('returns subscription growth per period', function () {
     expect($result[0])->toHaveKeys(['month', 'count']);
     expect($result[0]['count'])->toBeGreaterThanOrEqual(1);
 });
-
-// ── Revenue Metrics ─────────────────────────────────────────────────
 
 it('calculates MRR for monthly subscriptions', function () {
     $user = createUser();
@@ -350,8 +340,6 @@ it('returns revenue by package', function () {
     expect($result[0]['revenue'])->toBe(30.00);
 });
 
-// ── Invoice Metrics ─────────────────────────────────────────────────
-
 it('returns pending invoice count', function () {
     $user = createUser();
 
@@ -424,8 +412,6 @@ it('returns overdue invoice count', function () {
     expect($this->analytics->overdueInvoiceCount())->toBe(1);
 });
 
-// ── Churn Metrics ───────────────────────────────────────────────────
-
 it('calculates churn rate', function () {
     $user1 = createUser();
     $user2 = createUser();
@@ -476,8 +462,6 @@ it('returns churn trend data', function () {
     expect($result)->toBeArray()->toHaveCount(3);
     expect($result[0])->toHaveKeys(['month', 'churn_rate']);
 });
-
-// ── Daily Usage ─────────────────────────────────────────────────────
 
 // Note: getDailyUsage() depends on Tpetry\QueryExpressions\Function\DTime\Date
 // which is not available in the current version of tpetry/laravel-query-expressions.

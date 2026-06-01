@@ -8,4 +8,5 @@ enum FeatureType: string
     case Limit = 'limit';
     case Consumable = 'consumable';
     case Enum = 'enum';
+    case Metered = 'metered';
 }

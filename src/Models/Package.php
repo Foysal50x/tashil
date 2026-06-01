@@ -34,8 +34,6 @@ class Package extends BaseModel
         'metadata'         => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function features(): BelongsToMany
     {
         return $this->belongsToMany(
@@ -50,8 +48,6 @@ class Package extends BaseModel
     {
         return $this->hasMany(Subscription::class);
     }
-
-    // ── Scopes ───────────────────────────────────────────────────
 
     public function scopeActive(Builder $query): Builder
     {

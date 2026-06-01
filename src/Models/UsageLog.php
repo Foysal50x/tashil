@@ -16,8 +16,6 @@ class UsageLog extends BaseModel
         'metadata' => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function subscription(): BelongsTo
     {
         return $this->belongsTo(Subscription::class);

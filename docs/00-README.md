@@ -18,10 +18,12 @@ Tahsil is a Laravel package for **subscription and feature management**. It owns
 In scope:
 
 - Plans (packages) with billing model, trial config, feature definitions.
-- Polymorphic subscribers (`User`, `Team`, etc. via `HasSubscriptions`).
+- Polymorphic subscribers — any Eloquent model that `implements Subscribable` (`User`, `Team`, `Organization`, tenant models) via the `HasSubscriptions` trait.
 - Subscription lifecycle: create → active / on-trial → cancel (grace or immediate) → resume → switch → pause → expire.
 - Trial lifecycle: start → ending warning → convert | expire.
-- Feature gating (boolean, limit, consumable, enum) with atomic, race-safe usage tracking.
+- Feature gating (boolean, limit, consumable, enum, metered) with atomic, race-safe usage tracking.
+- Metered features: per-unit charges against a host-implemented `MeteredBilling`. Tahsil owns the snapshot + counter + event log; the host owns the balance.
+- Route middleware (`subscribed`, `plan:{slug}`, `feature:{slug}`) and a pluggable subscribable resolver (`Tashil::resolveSubscribableUsing`) for multi-tenant hosts.
 - Scheduled quota resets anchored to previous period_end (no cron drift).
 - Scheduled package changes (`scheduleDowngrade` applied at period end).
 - Immutable per-subscription event log with monotonic `sequence_num` and idempotency keys.

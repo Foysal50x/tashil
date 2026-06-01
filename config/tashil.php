@@ -18,7 +18,7 @@ return [
         // The database connection to use for Tashil tables.
         // If null, the default application connection will be used.
         // You can define a separate connection in config/database.php.
-        'connection' => env('TASHIL_DB_CONNECTION', null),
+        'connection' => env('DB_CONNECTION', null),
 
         // Table prefix for all Tashil tables.
         // This prefix will be prepended to the table names defined below.
@@ -155,6 +155,30 @@ return [
     |
     */
     'currency' => env('TASHIL_CURRENCY', 'USD'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route Middleware
+    |--------------------------------------------------------------------------
+    |
+    | Aliases under which tahsil's three route middleware are registered
+    | with the router on application boot. Set an alias to null or an
+    | empty string to skip registering it (e.g. when an existing alias
+    | in your host app already uses the same name).
+    |
+    | Usage in routes:
+    |   Route::middleware('subscribed')->group(...);
+    |   Route::middleware('plan:pro')->group(...);
+    |   Route::middleware('feature:api-calls')->group(...);
+    |
+    */
+    'middleware' => [
+        'aliases' => [
+            'subscribed' => 'subscribed',
+            'plan'       => 'plan',
+            'feature'    => 'feature',
+        ],
+    ],
 
     /*
     |--------------------------------------------------------------------------

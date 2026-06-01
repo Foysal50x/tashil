@@ -51,8 +51,6 @@ class PackageBuilder
         $this->currency = Config::get('tashil.currency', 'USD');
     }
 
-    // ── Fluent setters ──────────────────────────────────────────
-
     public function name(string $name): self
     {
         $this->name = $name;
@@ -154,8 +152,6 @@ class PackageBuilder
         return $this;
     }
 
-    // ── Feature assignment ──────────────────────────────────────
-
     /**
      * Attach a single feature to this package.
      *
@@ -207,8 +203,6 @@ class PackageBuilder
         return $this;
     }
 
-    // ── Terminal operations ──────────────────────────────────────
-
     /**
      * Create the package and attach features.
      */
@@ -257,8 +251,6 @@ class PackageBuilder
             'metadata'         => $this->metadata,
         ];
     }
-
-    // ── Internal ────────────────────────────────────────────────
 
     protected function attachFeatures(Package $package): void
     {

@@ -31,8 +31,6 @@ beforeEach(function () {
     $this->analytics = app(AnalyticsService::class);
 });
 
-// ── packageAnalytics() ──────────────────────────────────────────────
-
 it('returns per-package analytics for multiple packages', function () {
     // Create subscriptions for the monthly package
     $user1 = createUser();

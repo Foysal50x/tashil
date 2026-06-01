@@ -30,8 +30,6 @@ class Invoice extends BaseModel
         'metadata'  => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function subscription(): BelongsTo
     {
         return $this->belongsTo(Subscription::class);
@@ -42,8 +40,6 @@ class Invoice extends BaseModel
         return $this->hasMany(Transaction::class);
     }
 
-    // ── Scopes ───────────────────────────────────────────────────
-
     public function scopePaid(Builder $query): Builder
     {
         return $query->where('status', InvoiceStatus::Paid);
@@ -53,8 +49,6 @@ class Invoice extends BaseModel
     {
         return $query->where('status', InvoiceStatus::Pending);
     }
-
-    // ── Helpers ──────────────────────────────────────────────────
 
     public function isPaid(): bool
     {

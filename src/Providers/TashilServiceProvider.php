@@ -11,11 +11,15 @@ use Foysal50x\Tashil\Console\ResetQuotasCommand;
 use Foysal50x\Tashil\Contracts\FeatureRepositoryInterface;
 use Foysal50x\Tashil\Contracts\FeatureUsageRepositoryInterface;
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
+use Foysal50x\Tashil\Contracts\MeteredBilling;
 use Foysal50x\Tashil\Contracts\PackageRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionEventRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionFeatureRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
 use Foysal50x\Tashil\Contracts\UsageLogRepositoryInterface;
+use Foysal50x\Tashil\Http\Middleware\EnsureFeature;
+use Foysal50x\Tashil\Http\Middleware\EnsurePlan;
+use Foysal50x\Tashil\Http\Middleware\EnsureSubscribed;
 use Foysal50x\Tashil\Managers\CacheManager;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Transaction;
@@ -37,11 +41,15 @@ use Foysal50x\Tashil\Repositories\EloquentUsageLogRepository;
 use Foysal50x\Tashil\Services\AnalyticsService;
 use Foysal50x\Tashil\Services\BillingService;
 use Foysal50x\Tashil\Services\EventStore;
+use Foysal50x\Tashil\Services\Providers\NullMeteredBilling;
 use Foysal50x\Tashil\Services\SubscriptionService;
 use Foysal50x\Tashil\Services\UsageService;
 use Foysal50x\Tashil\Tashil;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
+use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\ServiceProvider;
 
@@ -57,6 +65,7 @@ class TashilServiceProvider extends ServiceProvider
         $this->registerCacheStore();
         $this->registerRepositories();
         $this->registerServices();
+        $this->registerMeteredBilling();
     }
 
     public function boot(): void
@@ -86,9 +95,10 @@ class TashilServiceProvider extends ServiceProvider
 
         Invoice::observe(InvoiceObserver::class);
         Transaction::observe(TransactionObserver::class);
-    }
 
-    // ── Redis ───────────────────────────────────────────────────
+        $this->registerMiddleware();
+        $this->registerBladeDirectives();
+    }
 
     protected function registerRedisConnection(): void
     {
@@ -96,8 +106,6 @@ class TashilServiceProvider extends ServiceProvider
         $redis[$this->storeName] = array_merge(Config::get('tashil.redis', []), []);
         Config::set('database.redis', $redis);
     }
-
-    // ── Cache ───────────────────────────────────────────────────
 
     protected function registerCacheStore(): void
     {
@@ -114,8 +122,6 @@ class TashilServiceProvider extends ServiceProvider
 
         Config::set('cache.stores', $stores);
     }
-
-    // ── Repositories ────────────────────────────────────────────
 
     protected function registerRepositories(): void
     {
@@ -184,8 +190,6 @@ class TashilServiceProvider extends ServiceProvider
         $this->app->singleton(SubscriptionEventRepositoryInterface::class, fn () => new EloquentSubscriptionEventRepository);
     }
 
-    // ── Services ────────────────────────────────────────────────
-
     protected function registerServices(): void
     {
         $this->app->singleton('tashil', function (Application $app) {
@@ -201,7 +205,102 @@ class TashilServiceProvider extends ServiceProvider
         $this->app->alias('tashil', Tashil::class);
     }
 
-    // ── Schedule ────────────────────────────────────────────────
+    /**
+     * Bind the default MeteredBilling. The Null implementation
+     * throws on every call so that consuming a Metered feature without
+     * a real provider configured fails loudly rather than silently.
+     * Hosts override this binding in their own service provider when
+     * they want Metered features to work.
+     */
+    protected function registerMeteredBilling(): void
+    {
+        $this->app->singletonIf(
+            MeteredBilling::class,
+            NullMeteredBilling::class,
+        );
+    }
+
+    /**
+     * Register the three route middleware (subscribed / plan / feature)
+     * under configurable aliases. Hosts that already use one of the
+     * default aliases for something else can rename via
+     * tashil.middleware.aliases.
+     */
+    protected function registerMiddleware(): void
+    {
+        $aliases = Config::get('tashil.middleware.aliases', [
+            'subscribed' => 'subscribed',
+            'plan'       => 'plan',
+            'feature'    => 'feature',
+        ]);
+
+        $router = $this->app->make(Router::class);
+
+        $map = [
+            'subscribed' => EnsureSubscribed::class,
+            'plan'       => EnsurePlan::class,
+            'feature'    => EnsureFeature::class,
+        ];
+
+        foreach ($map as $key => $class) {
+            $alias = $aliases[$key] ?? $key;
+            if ($alias === null || $alias === '') {
+                continue;
+            }
+            $router->aliasMiddleware($alias, $class);
+        }
+
+        // Older Laravel versions expose the HTTP kernel directly; binding
+        // the alias on the kernel keeps the package compatible with apps
+        // that still resolve middleware through Kernel::$routeMiddleware.
+        if ($this->app->bound(HttpKernelContract::class)) {
+            $kernel = $this->app->make(HttpKernelContract::class);
+            if (method_exists($kernel, 'getRouter')) {
+                foreach ($map as $key => $class) {
+                    $alias = $aliases[$key] ?? $key;
+                    if ($alias === null || $alias === '') {
+                        continue;
+                    }
+                    $kernel->getRouter()->aliasMiddleware($alias, $class);
+                }
+            }
+        }
+    }
+
+    /**
+     * Register Blade `@subscribed`, `@plan`, `@feature`, `@onTrial`
+     * conditional directives. All four resolve the subscribable through
+     * Tashil::resolveSubscribable(), so the same auth()->user() default
+     * and `resolveSubscribableUsing` override that drive the middleware
+     * also drive view rendering.
+     */
+    protected function registerBladeDirectives(): void
+    {
+        Blade::if('subscribed', function (): bool {
+            $sub = app(Tashil::class)->resolveSubscribable()?->resolveSubscription();
+
+            return $sub !== null && $sub->isValid();
+        });
+
+        Blade::if('plan', function (string $slug): bool {
+            $sub = app(Tashil::class)->resolveSubscribable()?->resolveSubscription();
+
+            return $sub !== null && $sub->isValid() && $sub->package?->slug === $slug;
+        });
+
+        Blade::if('feature', function (string $slug): bool {
+            $sub = app(Tashil::class)->resolveSubscribable()?->resolveSubscription();
+            if ($sub === null || ! $sub->isValid()) {
+                return false;
+            }
+
+            return app('tashil')->usage()->check($sub, $slug);
+        });
+
+        Blade::if('onTrial', function (): bool {
+            return app(Tashil::class)->resolveSubscribable()?->resolveSubscription()?->isOnTrial() ?? false;
+        });
+    }
 
     protected function registerSchedule(): void
     {

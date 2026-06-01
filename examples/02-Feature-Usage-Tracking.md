@@ -90,3 +90,132 @@ $user->featureRemaining('api-requests'); // float|null — null means unlimited
 $user->featureValue('api-requests');     // string|null — the snapshot value
 $user->dailyUsageFor('api-requests', 30); // daily aggregates from usage_logs
 ```
+
+## 7. Metered features — charged per unit consumed
+
+Metered features deduct `units × unit_price` from the subscriber's balance on every consume. Tashil never owns the balance — the host implements `MeteredBilling`.
+
+### Define
+
+```php
+$aiTokens = app('tashil')->feature('ai-tokens')
+    ->name('AI Tokens')
+    ->metered()
+    ->create();
+
+// Pivot value = unit price (decimal string) in the package's currency.
+$package->features()->attach($aiTokens, ['value' => '0.001']); // $0.001 per token
+```
+
+### Implement MeteredBilling — pick the pattern that fits your codebase
+
+Tashil supports two patterns and decides per consume which one to use. No global flag — `UsageService` checks `$subscriber instanceof MeteredBilling` first, and only falls back to the container binding if not.
+
+#### Pattern A — self-implement on the Subscribable model
+
+Best when the subscriber model itself owns the wallet/balance.
+
+```php
+namespace App\Models;
+
+use Foysal50x\Tashil\Contracts\MeteredBilling;
+use Foysal50x\Tashil\Contracts\Subscribable;
+use Foysal50x\Tashil\Traits\HasSubscriptions;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+
+class User extends Authenticatable implements Subscribable, MeteredBilling
+{
+    use HasSubscriptions;
+
+    public function getBalance(Subscribable $subscriber, string $currency): float
+    {
+        return (float) $this->wallets()->forCurrency($currency)->value('balance');
+    }
+
+    public function hasSufficientBalance(Subscribable $subscriber, string $currency, float $amount): bool
+    {
+        return $this->getBalance($subscriber, $currency) >= $amount;
+    }
+
+    public function charge(Subscribable $subscriber, string $currency, float $amount, array $context = []): bool
+    {
+        return $this->wallets()->forCurrency($currency)->debit(
+            $amount,
+            idempotencyKey: $context['idempotency_key'],
+            meta: $context,
+        );
+    }
+}
+```
+
+No binding needed — Tashil discovers the implementation through the model itself.
+
+#### Pattern B — standalone class bound via the container
+
+Best when billing lives in its own service layer or is shared across multiple subscriber types.
+
+```php
+namespace App\Billing;
+
+use Foysal50x\Tashil\Contracts\MeteredBilling;
+use Foysal50x\Tashil\Contracts\Subscribable;
+
+class WalletMeteredBilling implements MeteredBilling
+{
+    public function getBalance(Subscribable $subscriber, string $currency): float
+    {
+        return $subscriber->wallet($currency)->balance();
+    }
+
+    public function hasSufficientBalance(Subscribable $subscriber, string $currency, float $amount): bool
+    {
+        return $this->getBalance($subscriber, $currency) >= $amount;
+    }
+
+    public function charge(Subscribable $subscriber, string $currency, float $amount, array $context = []): bool
+    {
+        return $subscriber->wallet($currency)->debit(
+            $amount,
+            idempotencyKey: $context['idempotency_key'],
+            meta: $context,
+        );
+    }
+}
+```
+
+Bind in a service provider:
+
+```php
+// AppServiceProvider::register
+$this->app->bind(
+    \Foysal50x\Tashil\Contracts\MeteredBilling::class,
+    \App\Billing\WalletMeteredBilling::class,
+);
+```
+
+Both patterns get the same `$context` (with `idempotency_key`, `subscription_id`, `feature_id`, `feature_slug`, `units`, `unit_price`) and trigger the same `MeteredCharged` / `MeteredChargeRejected` events.
+
+### Consume
+
+```php
+// Charges 100 × 0.001 = 0.10 USD via the provider before advancing the counter.
+// Returns false on provider rejection (insufficient balance, gateway error).
+$ok = $user->useFeature('ai-tokens', 100);
+
+if (! $ok) {
+    // listen for MeteredChargeRejected to drive a top-up prompt
+}
+```
+
+What you get on success:
+
+- The counter advances by `units` (analytics).
+- One `usage_logs` row with `operation=consume` plus `metadata.amount`, `metadata.unit_price`, `metadata.currency`.
+- One `subscription_events` row (`event_type='usage.metered_charged'`).
+- `MeteredCharged` event after DB commit.
+
+On rejection: nothing is written, `MeteredChargeRejected` event fires, `useFeature()` returns `false`.
+
+Without a bound `MeteredBilling`, the default `NullMeteredBilling` throws `MeteredBillingNotConfiguredException` so misconfiguration fails loud.
+
+See [docs/02-Feature-System.md › Metered features](../docs/02-Feature-System.md#metered-features) for the idempotency contract and edge cases (trial charging policy, multi-currency, `reportStorage` refusal).

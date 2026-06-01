@@ -5,7 +5,6 @@ namespace Foysal50x\Tashil\Contracts;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
 
 interface SubscriptionRepositoryInterface
 {
@@ -27,17 +26,17 @@ interface SubscriptionRepositoryInterface
     /**
      * Get the current valid subscription for a subscriber.
      */
-    public function findValidForSubscriber(Model $subscriber): ?Subscription;
+    public function findValidForSubscriber(Subscribable $subscriber): ?Subscription;
 
     /**
      * Check if a subscriber has a valid subscription to a given package (or slug).
      */
-    public function subscriberHasValidSubscription(Model $subscriber, Package|string|null $package = null): bool;
+    public function subscriberHasValidSubscription(Subscribable $subscriber, Package|string|null $package = null): bool;
 
     /**
      * Find a cancelled-but-not-expired subscription for a subscriber.
      */
-    public function findCancelledResumable(Model $subscriber): ?Subscription;
+    public function findCancelledResumable(Subscribable $subscriber): ?Subscription;
 
     /**
      * Subscriptions whose current_period_end has elapsed and whose

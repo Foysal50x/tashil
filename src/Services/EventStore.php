@@ -6,6 +6,7 @@ use Foysal50x\Tashil\Contracts\SubscriptionEventRepositoryInterface;
 use Foysal50x\Tashil\Managers\DatabaseManager;
 use Foysal50x\Tashil\Models\Subscription;
 use Foysal50x\Tashil\Models\SubscriptionEvent;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
 
 /**
@@ -22,6 +23,16 @@ use Illuminate\Support\Str;
  */
 class EventStore
 {
+    /**
+     * UNIQUE(subscription_id, sequence_num) collisions are normally
+     * impossible — the lockForUpdate serializes appenders. They only
+     * happen when last_event_seq desynced from the actual max seq (e.g.,
+     * a raw SQL write that inserted an event without bumping
+     * last_event_seq). We retry a small number of times, recomputing the
+     * next seq from the table's max on each attempt, before giving up.
+     */
+    public const MAX_SEQUENCE_RETRIES = 3;
+
     public function __construct(
         protected DatabaseManager $db,
         protected SubscriptionEventRepositoryInterface $events,
@@ -35,9 +46,42 @@ class EventStore
         array $metadata = [],
         ?\DateTimeInterface $occurredAt = null,
     ): SubscriptionEvent {
+        $attempt = 0;
+
+        while (true) {
+            try {
+                return $this->appendOnce($subscription, $eventType, $payload, $idempotencyKey, $metadata, $occurredAt, $attempt);
+            } catch (UniqueConstraintViolationException $e) {
+                // Idempotency-key collision can happen if a concurrent
+                // appender inserted between our findByIdempotencyKey
+                // and our insert. Re-checking under the next attempt's
+                // lock will observe the row and return early.
+                if ($idempotencyKey !== null) {
+                    $existing = $this->events->findByIdempotencyKey($subscription->id, $idempotencyKey);
+                    if ($existing) {
+                        return $existing;
+                    }
+                }
+
+                if (++$attempt >= self::MAX_SEQUENCE_RETRIES) {
+                    throw $e;
+                }
+            }
+        }
+    }
+
+    protected function appendOnce(
+        Subscription $subscription,
+        string $eventType,
+        array $payload,
+        ?string $idempotencyKey,
+        array $metadata,
+        ?\DateTimeInterface $occurredAt,
+        int $attempt,
+    ): SubscriptionEvent {
         $connection = $this->db->connection();
 
-        return $connection->transaction(function () use ($connection, $subscription, $eventType, $payload, $idempotencyKey, $metadata, $occurredAt) {
+        return $connection->transaction(function () use ($connection, $subscription, $eventType, $payload, $idempotencyKey, $metadata, $occurredAt, $attempt) {
             // Lock the subscription row so concurrent appenders serialize
             // and assign monotonically increasing sequence_num values.
             $locked = $connection->table($subscription->getTable())
@@ -55,7 +99,14 @@ class EventStore
                 }
             }
 
-            $nextSeq = ((int) ($locked->last_event_seq ?? 0)) + 1;
+            // First attempt trusts the cached last_event_seq. Retries
+            // recompute from the table's max so we recover when the
+            // cached counter has desynced (e.g. an out-of-band insert).
+            if ($attempt === 0) {
+                $nextSeq = ((int) ($locked->last_event_seq ?? 0)) + 1;
+            } else {
+                $nextSeq = $this->events->maxSequence($subscription->id) + 1;
+            }
 
             $now = now();
 

@@ -3,6 +3,7 @@
 namespace Foysal50x\Tashil\Services;
 
 use Carbon\Carbon;
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
 use Foysal50x\Tashil\Enums\Period;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
@@ -20,9 +21,9 @@ use Foysal50x\Tashil\Events\TrialExpired;
 use Foysal50x\Tashil\Managers\DatabaseManager;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class SubscriptionService
 {
@@ -32,9 +33,7 @@ class SubscriptionService
         protected EventStore $eventStore,
     ) {}
 
-    // ── Subscribe ───────────────────────────────────────────────
-
-    public function subscribe(Model $subscriber, Package $package, bool $withTrial = false): Subscription
+    public function subscribe(Subscribable $subscriber, Package $package, bool $withTrial = false): Subscription
     {
         return $this->db->connection()->transaction(function () use ($subscriber, $package, $withTrial) {
             $startsAt = Carbon::now();
@@ -58,9 +57,16 @@ class SubscriptionService
                 $endsAt = $trialEndsAt;
             }
 
+            // Lifetime packages have no renewal cycle. Setting auto_renew
+            // false is defense-in-depth: dueForRenewal already filters by
+            // whereNotNull(current_period_end), but a future manual write
+            // that populates current_period_end shouldn't suddenly cause
+            // a lifetime subscription to start renewing.
+            $autoRenew = $package->billing_period !== Period::Lifetime;
+
             $subscription = $this->subscriptionRepo->create([
-                'subscriber_type'      => $subscriber->getMorphClass(),
-                'subscriber_id'        => $subscriber->getKey(),
+                'subscriber_type'      => $subscriber->getSubscriberType(),
+                'subscriber_id'        => $subscriber->getSubscriberKey(),
                 'package_id'           => $package->id,
                 'status'               => $status,
                 'starts_at'            => $startsAt,
@@ -69,7 +75,7 @@ class SubscriptionService
                 'current_period_end'   => $periodEnd,
                 'trial_started_at'     => $trialStartedAt,
                 'trial_ends_at'        => $trialEndsAt,
-                'auto_renew'           => true,
+                'auto_renew'           => $autoRenew,
             ]);
 
             $this->subscriptionRepo->syncFeatures($subscription, $package);
@@ -87,8 +93,6 @@ class SubscriptionService
             return $subscription;
         });
     }
-
-    // ── Cancel ──────────────────────────────────────────────────
 
     /**
      * Cancel a subscription.
@@ -136,8 +140,6 @@ class SubscriptionService
         });
     }
 
-    // ── Resume ──────────────────────────────────────────────────
-
     /**
      * Resume a pending-cancellation subscription before it expires.
      */
@@ -167,8 +169,6 @@ class SubscriptionService
         });
     }
 
-    // ── Expire ──────────────────────────────────────────────────
-
     /**
      * Promote a subscription to Expired. Called by the scheduled
      * expire-subscriptions job after ends_at / cancellation_effective_at.
@@ -190,8 +190,6 @@ class SubscriptionService
             return $subscription;
         });
     }
-
-    // ── Trial transitions ───────────────────────────────────────
 
     public function convertTrial(Subscription $subscription): Subscription
     {
@@ -235,8 +233,6 @@ class SubscriptionService
         });
     }
 
-    // ── Pause / Unpause ─────────────────────────────────────────
-
     public function pause(Subscription $subscription): Subscription
     {
         if ($subscription->isPaused()) {
@@ -273,8 +269,6 @@ class SubscriptionService
         });
     }
 
-    // ── Switch plan ─────────────────────────────────────────────
-
     /**
      * Switch a subscription to a different package — cancels the old
      * subscription immediately and creates a new one. Trial state is
@@ -287,13 +281,18 @@ class SubscriptionService
             $oldPackage = $subscription->package;
             $carryTrial = $subscription->isOnTrial() && $newPackage->trial_days > 0;
 
+            $subscriber = $subscription->subscriber;
+            if (! $subscriber instanceof Subscribable) {
+                throw new RuntimeException(sprintf(
+                    'Subscription %d cannot be switched: its subscriber (%s) does not implement Foysal50x\\Tashil\\Contracts\\Subscribable.',
+                    $subscription->id,
+                    $subscription->subscriber_type,
+                ));
+            }
+
             $this->cancel($subscription, immediate: true, reason: 'Plan switch');
 
-            $newSubscription = $this->subscribe(
-                $subscription->subscriber,
-                $newPackage,
-                withTrial: $carryTrial,
-            );
+            $newSubscription = $this->subscribe($subscriber, $newPackage, withTrial: $carryTrial);
 
             // Cross-link via event payload — the new subscription's first
             // event is its 'created' event; we attach a 'switched' marker
@@ -314,8 +313,6 @@ class SubscriptionService
             return $newSubscription;
         });
     }
-
-    // ── Scheduled change ────────────────────────────────────────
 
     /**
      * Queue a package change to take effect when the current period ends.
@@ -390,8 +387,6 @@ class SubscriptionService
         return $newSubscription;
     }
 
-    // ── Renewal advancement ─────────────────────────────────────
-
     /**
      * Advance current_period_end by one billing period. Called by
      * InvoiceObserver when an invoice is marked paid.
@@ -416,8 +411,6 @@ class SubscriptionService
             return $subscription;
         });
     }
-
-    // ── Internal ────────────────────────────────────────────────
 
     protected function calculatePeriodEnd(Carbon $start, Package $package): ?Carbon
     {

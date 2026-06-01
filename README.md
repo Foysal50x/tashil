@@ -23,7 +23,8 @@ It **does not charge** — payment capture, dunning retries, refunds, and gatewa
 - [Scheduler](#scheduler)
 - [Events](#events)
 - [Analytics & Reporting](#analytics--reporting)
-- [HasSubscriptions Trait](#hassubscriptions-trait)
+- [Subscribable + HasSubscriptions Trait](#subscribable--hassubscriptions-trait)
+- [Route Middleware](#route-middleware)
 - [Caching Architecture](#caching-architecture)
 - [Documentation](#documentation)
 - [Testing](#testing)
@@ -69,13 +70,22 @@ php artisan migrate
 ## Quick Start
 
 ```php
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Enums\ResetPeriod;
+use Foysal50x\Tashil\Traits\HasSubscriptions;
+
+// 0. Make your subscriber model Subscribable (User, Team, Tenant, ...)
+class User extends Authenticatable implements Subscribable
+{
+    use HasSubscriptions;
+}
 
 // 1. Define features (catalog)
 $apiCalls = Tashil::feature('api-calls')->name('API Calls')->limit()->create();
 $darkMode = Tashil::feature('dark-mode')->name('Dark Mode')->boolean()->create();
 $storage  = Tashil::feature('storage-gb')->name('Storage (GB)')->consumable()->create();
+$aiTokens = Tashil::feature('ai-tokens')->name('AI Tokens')->metered()->create();
 
 $apiCalls->update(['reset_period' => ResetPeriod::Monthly]); // resets each month
 
@@ -88,9 +98,10 @@ $proPlan = Tashil::package('pro')
     ->feature($apiCalls, value: '10000')
     ->feature($darkMode, value: 'true')
     ->feature($storage,  value: '50')
+    ->feature($aiTokens, value: '0.001')   // metered: 0.001 USD per token
     ->create();
 
-// 3. Subscribe a user — User uses the HasSubscriptions trait
+// 3. Subscribe a user
 $subscription = Tashil::subscription()->subscribe($user, $proPlan, withTrial: true);
 
 // 4. Gate access + track usage
@@ -98,16 +109,19 @@ if ($user->hasFeature('api-calls')) {
     $user->useFeature('api-calls');         // atomic increment, returns false if over limit
 }
 
-// 5. Report absolute usage for storage-style features
+// 5. Metered consume — charges (units × unit_price) via MeteredBilling
+$user->useFeature('ai-tokens', 1500);       // returns false on insufficient balance
+
+// 6. Report absolute usage for storage-style features
 $user->reportStorage('storage-gb', 38.5);   // 38.5 GB
 
-// 6. Lifecycle ops
+// 7. Lifecycle ops
 $user->cancelSubscription();                                 // grace cancel
 $user->pauseSubscription(); $user->unpauseSubscription();
 $user->scheduleDowngrade($basicPlan);                        // applied at period end
 $user->switchPlan($enterprisePlan);                          // immediate
 
-// 7. Analytics
+// 8. Analytics
 $kpis = Tashil::analytics()->dashboardSummary();
 ```
 
@@ -142,6 +156,12 @@ return [
         'generator' => Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator::class,
     ],
 
+    'transaction' => [
+        'prefix'    => 'TXN',
+        'format'    => '#-YYMMDD-NNNNNNAA',
+        'generator' => Foysal50x\Tashil\Services\Generators\TransactionIdGenerator::class,
+    ],
+
     'currency' => env('TASHIL_CURRENCY', 'USD'),
 
     'trial' => [
@@ -161,6 +181,14 @@ return [
 
     'events' => [
         'async' => env('TASHIL_EVENTS_ASYNC', true),
+    ],
+
+    'middleware' => [
+        'aliases' => [
+            'subscribed' => 'subscribed',
+            'plan'       => 'plan',
+            'feature'    => 'feature',
+        ],
     ],
 
     'redis' => [/* … */],
@@ -237,7 +265,7 @@ See [docs/05-Reporting-Data-Model.md](docs/05-Reporting-Data-Model.md).
 
 ## Feature System
 
-Four feature types, all with consistent storage + atomic enforcement:
+Five feature types, all with consistent storage + atomic enforcement:
 
 | Type | Behavior |
 |---|---|
@@ -245,6 +273,7 @@ Four feature types, all with consistent storage + atomic enforcement:
 | `FeatureType::Limit` | Numeric quota with hard enforcement via atomic conditional UPDATE. |
 | `FeatureType::Consumable` | Tracked usage without a hard ceiling (soft metering). |
 | `FeatureType::Enum` | Named option / tier label. |
+| `FeatureType::Metered` | Per-unit charge deducted from the subscriber's balance via a host-implemented `MeteredBilling`. Pivot `value` is the unit price (decimal string). |
 
 ### Reset cadence (`ResetPeriod`)
 
@@ -280,9 +309,50 @@ Two concurrent callers cannot both succeed past the limit. The increment returns
 $user->reportStorage('storage-gb', 12.5);
 ```
 
-Use when the host knows the absolute value (storage bytes, AI compute hours). `UsageLimitWarning` fires only on crossings of 80%, not on every report.
+Use when the host knows the absolute value (storage bytes, AI compute hours). `UsageLimitWarning` fires only on crossings of 80%, not on every report. Rejected for metered features (delta-charge model, not absolute set).
 
-See [docs/02-Feature-System.md](docs/02-Feature-System.md).
+### Metered features
+
+```php
+// Feature defined once; pivot value = unit price (USD per unit).
+$aiTokens = Tashil::feature('ai-tokens')->metered()->create();
+Tashil::package('payg')->price(0)->monthly()
+    ->feature($aiTokens, value: '0.001')
+    ->create();
+
+// Consuming charges (units × unit_price) via the bound provider.
+// Returns false if the provider declines (insufficient balance, etc.).
+$user->useFeature('ai-tokens', 100);   // charges 0.10 USD
+
+// Pass a stable idempotency key on retryable call paths (request id, job
+// uuid). It flows verbatim to the provider in $context['idempotency_key'];
+// when omitted, Tashil generates a fresh UUID per call.
+$user->useFeature('ai-tokens', 100, idempotencyKey: $request->header('X-Idempotency-Key'));
+```
+
+Tashil never owns balances. Implement `MeteredBilling` using whichever pattern fits — Tashil checks the subscriber per consume, no flag to flip:
+
+```php
+// Pattern A — self-implement on the Subscribable model (no binding needed)
+class User extends Authenticatable implements Subscribable, MeteredBilling
+{
+    use HasSubscriptions;
+
+    public function getBalance(Subscribable $s, string $currency): float        { /* ... */ }
+    public function hasSufficientBalance(Subscribable $s, string $currency, float $a): bool { /* ... */ }
+    public function charge(Subscribable $s, string $currency, float $a, array $ctx = []): bool { /* ... */ }
+}
+
+// Pattern B — standalone class bound via the container
+$this->app->bind(
+    \Foysal50x\Tashil\Contracts\MeteredBilling::class,
+    \App\Billing\WalletMeteredBilling::class,
+);
+```
+
+Mix freely — different subscriber types can use different patterns. Without either (and the default `NullMeteredBilling` still bound), `useFeature` for a metered feature throws `MeteredBillingNotConfiguredException` so misconfiguration fails loud. On success Tashil fires `MeteredCharged`; on rejection it fires `MeteredChargeRejected`.
+
+See [docs/02-Feature-System.md › Metered features](docs/02-Feature-System.md#metered-features) for both patterns side-by-side, the idempotency requirements, and consumption flow.
 
 ---
 
@@ -359,6 +429,8 @@ All events dispatch after `DB::afterCommit()` so listeners never see torn state 
 | `TrialExpired` | `expireTrial()` or the expire-trials job. |
 | `UsageReset` | Manual or scheduled reset. |
 | `UsageLimitWarning` | 80% threshold crossed (fired once per period). |
+| `MeteredCharged` | Metered `useFeature()` charge accepted — carries units, unit price, amount, currency. |
+| `MeteredChargeRejected` | Metered charge declined (insufficient balance / provider refusal). |
 | `InvoiceIssued` / `InvoicePaid` / `InvoiceVoided` / `InvoiceOverdue` | Invoice lifecycle. |
 
 Listen normally:
@@ -390,14 +462,30 @@ For audit / point-in-time questions, walk the event log + feature snapshots — 
 
 ---
 
-## HasSubscriptions Trait
+## Subscribable + HasSubscriptions Trait
+
+Any Eloquent model can be a subscriber by implementing the `Subscribable` contract and applying the `HasSubscriptions` trait:
 
 ```php
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Traits\HasSubscriptions;
 
-class User extends Authenticatable
+class User extends Authenticatable implements Subscribable
 {
     use HasSubscriptions;
+}
+```
+
+`implements Subscribable` is **required** — every library type-hint accepts `Subscribable`, not Eloquent's `Model`. The trait provides default implementations for all four interface methods.
+
+Override `resolveSubscription()` to change which subscription represents "the active one" for multi-sub / tenant scenarios:
+
+```php
+public function resolveSubscription(): ?Subscription
+{
+    return $this->subscriptions()->valid()
+        ->where('package_id', $this->currentWorkspace->preferredPackageId)
+        ->first();
 }
 ```
 
@@ -436,7 +524,52 @@ $user->dailyUsageFor('api-calls', days: 30);
 $user->invoices();             // Collection of all invoices across all subs
 ```
 
-`loadSubscription()` caches the active subscription for the model instance — feature checks and usage operations all share the same row.
+`loadSubscription()` caches the active subscription for the model instance — feature checks and usage operations all share the same row. It calls `resolveSubscription()` exactly once per request lifecycle, so overrides take effect uniformly.
+
+---
+
+## Route Middleware
+
+Three middleware ship and auto-register on boot:
+
+| Alias | Purpose |
+|---|---|
+| `subscribed` | Requires a currently valid subscription. |
+| `plan:{slug}` | Requires a valid subscription on the named package. |
+| `feature:{slug}` | Requires the named feature on the current snapshot (honors per-type semantics — limit remaining, metered balance, boolean truthy). |
+
+```php
+Route::middleware('subscribed')->group(fn () => /* ... */);
+Route::middleware('plan:pro')->group(fn () => /* ... */);
+Route::middleware('feature:api-calls')->group(fn () => /* ... */);
+```
+
+All abort `403` on failure. Aliases are overridable via `config('tashil.middleware.aliases')`.
+
+### Blade directives
+
+Four conditional directives use the same subscribable resolver as the middleware:
+
+```blade
+@subscribed   ... @endsubscribed
+@plan('pro')  ... @endplan
+@feature('api-calls') ... @endfeature
+@onTrial      ... @endonTrial
+```
+
+All support `@else`. They degrade to `false` when no subscribable can be resolved.
+
+### Subscribable resolver
+
+By default, `auth()->user()` is the subscribable. Override in `AppServiceProvider::boot`:
+
+```php
+use Foysal50x\Tashil\Facades\Tashil;
+
+Tashil::resolveSubscribableUsing(fn () => Team::current());
+```
+
+`Tashil::resolveSubscribable()` returns `null` when no resolver is set and the user is unauthenticated, or when the resolved object doesn't implement `Subscribable`. Middleware treat both as 403.
 
 ---
 
@@ -490,7 +623,7 @@ composer test
 ./vendor/bin/pest
 ```
 
-The suite covers subscription lifecycle, grace cancellation, EventStore monotonicity + idempotency + immutability, atomic usage with race rejection, trial transitions, scheduled jobs, analytics, and the trait surface. 211 tests / 550 assertions at the time of writing.
+The suite covers subscription lifecycle, grace cancellation, EventStore monotonicity + idempotency + immutability, atomic usage with race rejection, metered charge ordering + idempotency, amount validation, middleware, Blade directives, trial transitions, pause/resume/pending-change lifecycle, scheduled jobs, analytics, and the trait surface. 319 tests / 839 assertions at the time of writing.
 
 ---
 

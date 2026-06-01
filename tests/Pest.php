@@ -1,5 +1,6 @@
 <?php
 
+use Foysal50x\Tashil\Models\SubscriptionEvent;
 use Foysal50x\Tashil\Tests\Fixtures\User;
 use Foysal50x\Tashil\Tests\TestCase;
 
@@ -36,4 +37,17 @@ function createUser(array $attributes = []): User
         'name'  => 'Test User',
         'email' => 'test-' . uniqid() . '@example.com',
     ], $attributes));
+}
+
+/**
+ * Count event-store rows of a given type for a subscription. The event log
+ * is written synchronously inside the service transaction, so it is the most
+ * reliable signal that a transition actually fired.
+ */
+function subscriptionEventCount(int $subscriptionId, string $eventType): int
+{
+    return SubscriptionEvent::query()
+        ->where('subscription_id', $subscriptionId)
+        ->where('event_type', $eventType)
+        ->count();
 }

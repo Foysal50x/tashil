@@ -40,8 +40,6 @@ class Subscription extends BaseModel
         'metadata'                  => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function subscriber(): MorphTo
     {
         return $this->morphTo();
@@ -86,8 +84,6 @@ class Subscription extends BaseModel
     {
         return $this->hasMany(Invoice::class);
     }
-
-    // ── Status helpers ───────────────────────────────────────────
 
     public function isActive(): bool
     {
@@ -148,8 +144,6 @@ class Subscription extends BaseModel
     {
         return $this->pending_package_id !== null && $this->pending_change_at !== null;
     }
-
-    // ── Scopes ───────────────────────────────────────────────────
 
     public function scopeActive(Builder $query): Builder
     {
