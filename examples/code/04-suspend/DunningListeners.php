@@ -96,7 +96,6 @@ class RevokeAccessOnSuspend implements ShouldQueue
     public function handle(SubscriptionSuspended $event): void
     {
         $subscription = $event->subscription;
-        $subscriber = $subscription->subscriber;
 
         Log::warning('Subscription suspended — revoking access', [
             'subscription_id' => $subscription->id,
