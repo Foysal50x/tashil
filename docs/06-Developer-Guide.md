@@ -137,7 +137,7 @@ Both `tashil_invoices.invoice_number` and `tashil_transactions.transaction_id` a
 
 The transaction observer only fires when the row is created without a `transaction_id` — gateway-driven flows that already have a Stripe / Paddle / … id should pass it through and the observer leaves it alone. The auto-id path covers cases like an admin recording a cash payment.
 
-Both built-in generators share `TokenizedIdGenerator`, an abstract base that owns the token grammar (`#`, `YY`, `MM`, `DD`, `N`, `S`, `A`) and the `generate()` body. Subclasses declare only which config keys to read:
+Both built-in generators share `TokenizedIdGenerator`, an abstract base that owns the token grammar (`#`, `YY`, `MM`, `DD`, `N`, `S`, `A`). It renders one id from the template in `build()`, and `generate()` wraps that — returning it directly, or (for a `ShouldBeUnique` generator) re-rendering until `isUnique()` accepts it. Subclasses declare only which config keys to read:
 
 ```php
 namespace Foysal50x\Tashil\Services\Generators;
@@ -169,6 +169,45 @@ class StripeStyleGenerator
 ```
 
 Format-token entropy matters at bulk-insert time. The defaults give ~1M (`NNNNNN`) and ~1.3B (`NNNNNNAA`) combinations per `YYMMDD` bucket; the transaction default is wider because gateways can drop several hundred webhooks per minute. Widen the format if you expect more than ~√combos rows on a single day or you will hit birthday collisions. The composite `UNIQUE(gateway, transaction_id)` is the last line of defence; a colliding generator output will surface as a `UniqueConstraintViolationException` rather than silent corruption.
+
+#### Guaranteed-unique ids (opt-in)
+
+Rather than relying on entropy + the DB constraint to *catch* a collision, a generator can *verify* uniqueness up front by implementing `Foysal50x\Tashil\Contracts\ShouldBeUnique`. `TokenizedIdGenerator::generate()` then re-renders the id until `isUnique()` accepts it (or the attempt budget is exhausted). Generators that don't implement the contract return the rendered id immediately — no extra query, no behavior change. The two built-in generators are **not** unique-aware by default; opt in when you need it:
+
+```php
+namespace App\Billing;
+
+use Foysal50x\Tashil\Contracts\ShouldBeUnique;
+use Foysal50x\Tashil\Models\Invoice;
+use Foysal50x\Tashil\Services\Generators\TokenizedIdGenerator;
+
+class UniqueInvoiceNumberGenerator extends TokenizedIdGenerator implements ShouldBeUnique
+{
+    protected function prefix(): string
+    {
+        return (string) config('tashil.invoice.prefix', 'INV');
+    }
+
+    protected function format(): string
+    {
+        return (string) config('tashil.invoice.format', '#-YYMMDD-NNNNNN');
+    }
+
+    // Verify against the live table. Return false to force another render.
+    public function isUnique(string $id): bool
+    {
+        return ! Invoice::withTrashed()->where('invoice_number', $id)->exists();
+    }
+
+    // Optional: widen the retry budget for tight formats (default 10).
+    protected function maxGenerationAttempts(): int
+    {
+        return 25;
+    }
+}
+```
+
+Point the config at it: `'generator' => \App\Billing\UniqueInvoiceNumberGenerator::class`. If the format space is too small to find a free id within `maxGenerationAttempts()`, `generate()` throws `Foysal50x\Tashil\Exceptions\UniqueIdGenerationException` (a `RuntimeException` subclass) — a signal to widen the format, not to retry. Keep `isUnique()` a cheap indexed lookup; it runs on the row-`creating` path for every id.
 
 ### 3. Custom repository implementations
 

@@ -2,6 +2,8 @@
 
 namespace Foysal50x\Tashil\Services\Generators;
 
+use Foysal50x\Tashil\Contracts\ShouldBeUnique;
+use Foysal50x\Tashil\Exceptions\UniqueIdGenerationException;
 use Illuminate\Support\Str;
 
 /**
@@ -33,6 +35,35 @@ abstract class TokenizedIdGenerator
 
     public function generate(): string
     {
+        $id = $this->build();
+
+        // Generators that don't opt into uniqueness return the rendered id
+        // straight away — no verification, no extra query.
+        if (! $this instanceof ShouldBeUnique) {
+            return $id;
+        }
+
+        // Opted in: re-render until isUnique() accepts an id, bounded by
+        // maxGenerationAttempts() so an exhausted format space (or a buggy
+        // isUnique) fails loudly instead of looping forever.
+        for ($attempt = 1; ! $this->isUnique($id); $attempt++) {
+            if ($attempt >= $this->maxGenerationAttempts()) {
+                throw UniqueIdGenerationException::afterMaxAttempts(static::class, $attempt);
+            }
+
+            $id = $this->build();
+        }
+
+        return $id;
+    }
+
+    /**
+     * Render one id from the format template. Pure: each call may differ only
+     * by its random tokens, so it is safe to call repeatedly when retrying for
+     * uniqueness.
+     */
+    protected function build(): string
+    {
         $processed = $this->replaceRandomTokens($this->format());
 
         return str_replace(
@@ -40,6 +71,15 @@ abstract class TokenizedIdGenerator
             [$this->prefix(), now()->format('y'), now()->format('m'), now()->format('d')],
             $processed,
         );
+    }
+
+    /**
+     * Maximum number of render attempts before a ShouldBeUnique generator
+     * gives up. Override to widen the budget for tight formats.
+     */
+    protected function maxGenerationAttempts(): int
+    {
+        return 10;
     }
 
     protected function replaceRandomTokens(string $format): string

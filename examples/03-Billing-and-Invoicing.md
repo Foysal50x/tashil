@@ -63,6 +63,31 @@ Configure the invoice number format in `config/tashil.php`.
 Format `INV-#-YY-NNN` results in `INV-INV-23-481`.
 Format `#-YYMMDD-NNNNNN` results in `INV-231125-849021`.
 
+### Guaranteed-unique numbers
+
+The built-in generator renders a number from the format and returns it; collisions are caught only by the database. To verify uniqueness up front, point `generator` at a class that extends `TokenizedIdGenerator` **and** implements `ShouldBeUnique` — `generate()` then re-renders until your `isUnique()` accepts the id (or throws `UniqueIdGenerationException` once the attempt budget is exhausted):
+
+```php
+use Foysal50x\Tashil\Contracts\ShouldBeUnique;
+use Foysal50x\Tashil\Models\Invoice;
+use Foysal50x\Tashil\Services\Generators\TokenizedIdGenerator;
+
+class UniqueInvoiceNumberGenerator extends TokenizedIdGenerator implements ShouldBeUnique
+{
+    protected function prefix(): string { return (string) config('tashil.invoice.prefix', 'INV'); }
+    protected function format(): string { return (string) config('tashil.invoice.format', '#-YYMMDD-NNNNNN'); }
+
+    public function isUnique(string $id): bool
+    {
+        return ! Invoice::withTrashed()->where('invoice_number', $id)->exists();
+    }
+}
+
+// config/tashil.php → 'invoice' => ['generator' => \App\Billing\UniqueInvoiceNumberGenerator::class]
+```
+
+Full runnable version: [code/00-setup/UniqueInvoiceNumberGenerator.php](./code/00-setup/UniqueInvoiceNumberGenerator.php).
+
 ## 3. Invoice Status Flow
 
 Invoices typically follow this flow:
