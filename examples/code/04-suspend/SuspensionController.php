@@ -103,9 +103,9 @@ class SuspensionController extends Controller
             'suspended_at'     => $subscription->suspended_at,
             'has_access'       => $subscription->isValid(),
             'overdue_invoice'  => $overdue ? [
-                'id'       => $overdue->id,
-                'amount'   => $overdue->amount,
-                'due_date' => $overdue->due_date,
+                'id'           => $overdue->id,
+                'amount'       => $overdue->amount,
+                'due_date'     => $overdue->due_date,
                 'days_overdue' => (int) $overdue->due_date->diffInDays(now()),
             ] : null,
         ]);

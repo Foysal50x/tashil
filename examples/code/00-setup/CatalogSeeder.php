@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Database\Seeders;
 
 use Foysal50x\Tashil\Enums\FeatureType;
+use Foysal50x\Tashil\Enums\ResetPeriod;
 use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
@@ -61,7 +62,7 @@ class CatalogSeeder extends Seeder
             ->name('Team Seats')
             ->description('Maximum active members')
             ->limit()
-            ->resetPeriod(\Foysal50x\Tashil\Enums\ResetPeriod::Never)
+            ->resetPeriod(ResetPeriod::Never)
             ->create();
 
         // CONSUMABLE — a counter with NO built-in cap. Increments always
@@ -100,11 +101,11 @@ class CatalogSeeder extends Seeder
      */
     private function seedPackages(): void
     {
-        $sso          = Feature::where('slug', 'sso')->firstOrFail();
-        $apiCalls     = Feature::where('slug', 'api-calls')->firstOrFail();
-        $seats        = Feature::where('slug', 'team-seats')->firstOrFail();
+        $sso = Feature::where('slug', 'sso')->firstOrFail();
+        $apiCalls = Feature::where('slug', 'api-calls')->firstOrFail();
+        $seats = Feature::where('slug', 'team-seats')->firstOrFail();
         $emailCredits = Feature::where('slug', 'email-credits')->firstOrFail();
-        $aiTokens     = Feature::where('slug', 'ai-tokens')->firstOrFail();
+        $aiTokens = Feature::where('slug', 'ai-tokens')->firstOrFail();
         $exportFormat = Feature::where('slug', 'export-format')->firstOrFail();
 
         // FREE — activates instantly (requiresPayment(false)). No invoice, no

@@ -68,7 +68,7 @@ class LimitFeatureExample extends Controller
      */
     public function makeBatchCalls(Request $request): JsonResponse
     {
-        $user  = $request->user();
+        $user = $request->user();
         $count = (int) $request->integer('count', 1);
 
         // Pre-flight check (read-only, no mutation) if you want to tell the
@@ -96,9 +96,9 @@ class LimitFeatureExample extends Controller
     {
         $user = $request->user();
 
-        $used      = $user->featureUsage('api-calls');
+        $used = $user->featureUsage('api-calls');
         $remaining = $user->featureRemaining('api-calls');   // null when unlimited
-        $cap       = $remaining === null ? null : $used + $remaining;
+        $cap = $remaining === null ? null : $used + $remaining;
 
         return response()->json([
             'used'      => $used,
@@ -117,9 +117,9 @@ class LimitFeatureExample extends Controller
      */
     public function setSeatCount(Request $request): JsonResponse
     {
-        $user      = $request->user();
+        $user = $request->user();
         $seatCount = (float) $request->integer('seats');
-        $sub       = $user->subscription();
+        $sub = $user->subscription();
 
         // check() validates the absolute target against the cap.
         if (! Tashil::usage()->check($sub, 'team-seats', $seatCount)) {

@@ -48,9 +48,9 @@ class PaymentWebhookController extends Controller
             return response()->json(['ignored' => $event]);
         }
 
-        $payload   = $request->input('data.object', []);
+        $payload = $request->input('data.object', []);
         $invoiceId = $payload['metadata']['tashil_invoice_id'] ?? null;
-        $chargeId  = $payload['id'] ?? null;            // e.g. "ch_3P..."
+        $chargeId = $payload['id'] ?? null;            // e.g. "ch_3P..."
 
         $invoice = $invoiceId ? Invoice::find($invoiceId) : null;
         if ($invoice === null) {

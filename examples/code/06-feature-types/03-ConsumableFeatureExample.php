@@ -37,7 +37,7 @@ class ConsumableFeatureExample extends Controller
      */
     public function sendEmail(Request $request): JsonResponse
     {
-        $user  = $request->user();
+        $user = $request->user();
         $count = (float) $request->integer('count', 1);
 
         // The plan allowance (the snapshot value) — what's "included".
@@ -47,7 +47,7 @@ class ConsumableFeatureExample extends Controller
         // because consumables don't hard-cap.
         $user->useFeature('email-credits', $count);
 
-        $used    = $user->featureUsage('email-credits');
+        $used = $user->featureUsage('email-credits');
         $overage = max(0.0, $used - $allowance);
 
         // Host-side soft policy: bill the overage / nudge to upgrade.
@@ -72,11 +72,11 @@ class ConsumableFeatureExample extends Controller
         $user = $request->user();
 
         $allowance = (float) ($user->featureValue('email-credits') ?? 0);
-        $used      = $user->featureUsage('email-credits');
+        $used = $user->featureUsage('email-credits');
 
         return response()->json([
-            'allowance' => $allowance,
-            'used'      => $used,
+            'allowance'          => $allowance,
+            'used'               => $used,
             'included_remaining' => max(0.0, $allowance - $used),
             'in_overage'         => $used > $allowance,
         ]);
@@ -94,7 +94,7 @@ class ConsumableFeatureExample extends Controller
      */
     public function syncStorageUsage(Request $request): JsonResponse
     {
-        $user      = $request->user();
+        $user = $request->user();
         $totalGigs = (float) $request->input('gb_used');   // e.g. 38.5
 
         // Imagine 'email-credits' here were a consumable 'storage-gb' counter —

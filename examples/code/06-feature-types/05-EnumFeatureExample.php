@@ -52,7 +52,7 @@ class EnumFeatureExample extends Controller
         ));
 
         return response()->json([
-            'plan_format'      => $granted,
+            'plan_format'       => $granted,
             'available_formats' => $unlocked,    // ['csv', 'xlsx', 'pdf']
         ]);
     }
@@ -62,7 +62,7 @@ class EnumFeatureExample extends Controller
      */
     public function export(Request $request): JsonResponse
     {
-        $user      = $request->user();
+        $user = $request->user();
         $requested = (string) $request->input('format', 'csv');
 
         // 1. Is the feature on the plan at all?
@@ -71,14 +71,14 @@ class EnumFeatureExample extends Controller
         }
 
         // 2. Is the REQUESTED option within the plan's granted tier?
-        $granted     = (string) $user->featureValue('export-format');
+        $granted = (string) $user->featureValue('export-format');
         $grantedRank = self::FORMAT_RANK[$granted] ?? 0;
-        $wantRank    = self::FORMAT_RANK[$requested] ?? PHP_INT_MAX;
+        $wantRank = self::FORMAT_RANK[$requested] ?? PHP_INT_MAX;
 
         if ($wantRank > $grantedRank) {
             return response()->json([
-                'message'      => "Your plan unlocks '{$granted}'. Upgrade to export '{$requested}'.",
-                'plan_format'  => $granted,
+                'message'     => "Your plan unlocks '{$granted}'. Upgrade to export '{$requested}'.",
+                'plan_format' => $granted,
             ], 403);
         }
 

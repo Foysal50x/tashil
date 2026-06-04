@@ -123,7 +123,7 @@ class DashboardController extends Controller
                 Carbon::parse($from ?? $now->copy()->startOfMonth())->startOfDay(),
                 Carbon::parse($to ?? $now)->endOfDay(),
             ],
-            default        => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
+            default => [$now->copy()->startOfMonth(), $now->copy()->endOfMonth()],
         };
     }
 

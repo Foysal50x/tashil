@@ -43,7 +43,7 @@ class CheckoutController extends Controller
      */
     public function start(Request $request): JsonResponse
     {
-        $user       = $request->user();
+        $user = $request->user();
         $enterprise = Package::where('slug', 'enterprise')->firstOrFail();
 
         try {
@@ -69,7 +69,7 @@ class CheckoutController extends Controller
         return response()->json([
             'subscription_status' => $subscription->status->value,  // "pending"
             'has_access'          => $subscription->isValid(),       // false
-            'invoice' => [
+            'invoice'             => [
                 'id'       => $invoice->id,
                 'number'   => $invoice->invoice_number,
                 'amount'   => $invoice->amount,

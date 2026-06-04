@@ -41,7 +41,7 @@ class TrialController extends Controller
     public function start(Request $request): JsonResponse
     {
         $user = $request->user();
-        $pro  = Package::where('slug', 'pro')->firstOrFail();
+        $pro = Package::where('slug', 'pro')->firstOrFail();
 
         try {
             // withTrial: true → status OnTrial, access granted immediately,
@@ -73,17 +73,17 @@ class TrialController extends Controller
     public function status(Request $request): JsonResponse
     {
         $user = $request->user();
-        $sub  = $user->subscription();           // resolves the valid subscription
+        $sub = $user->subscription();           // resolves the valid subscription
 
         return response()->json([
-            'on_trial'        => $user->onTrial(),
-            'days_remaining'  => $sub?->trial_ends_at
+            'on_trial'       => $user->onTrial(),
+            'days_remaining' => $sub?->trial_ends_at
                 ? (int) now()->diffInDays($sub->trial_ends_at, false)
                 : null,
-            'trial_ends_at'   => $sub?->trial_ends_at,
+            'trial_ends_at' => $sub?->trial_ends_at,
             // While on trial every entitled feature already works:
-            'can_use_sso'     => $user->hasFeature('sso'),
-            'api_calls_left'  => $user->featureRemaining('api-calls'),
+            'can_use_sso'    => $user->hasFeature('sso'),
+            'api_calls_left' => $user->featureRemaining('api-calls'),
         ]);
     }
 
@@ -102,7 +102,7 @@ class TrialController extends Controller
     public function convert(Request $request): JsonResponse
     {
         $user = $request->user();
-        $sub  = $user->subscription();
+        $sub = $user->subscription();
 
         if ($sub === null || ! $sub->isOnTrial()) {
             return response()->json(['message' => 'No active trial to convert.'], 422);

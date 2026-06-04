@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Features;
 
 use App\Http\Controllers\Controller;
+use Foysal50x\Tashil\Contracts\MeteredBilling;
 use Foysal50x\Tashil\Events\MeteredChargeRejected;
 use Foysal50x\Tashil\Exceptions\MeteredBillingNotConfiguredException;
 use Foysal50x\Tashil\Facades\Tashil;
@@ -45,7 +46,7 @@ class MeteredFeatureExample extends Controller
      */
     public function complete(Request $request): JsonResponse
     {
-        $user   = $request->user();
+        $user = $request->user();
         $tokens = (float) $request->integer('tokens');
 
         // A stable key for THIS logical operation. Use the request id, a job
@@ -90,7 +91,7 @@ class MeteredFeatureExample extends Controller
      */
     public function canAfford(Request $request): JsonResponse
     {
-        $user   = $request->user();
+        $user = $request->user();
         $tokens = (float) $request->integer('tokens', 1);
 
         return response()->json([
@@ -107,7 +108,7 @@ class MeteredFeatureExample extends Controller
     {
         $sub = $user->subscription();
 
-        return app(\Foysal50x\Tashil\Contracts\MeteredBilling::class)
+        return app(MeteredBilling::class)
             ->getBalance($user, $sub->package->currency);
     }
 }

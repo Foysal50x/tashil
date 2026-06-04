@@ -47,9 +47,9 @@ class RetryDunningCharge implements ShouldQueue
 
     public function handle(SubscriptionPastDue $event): void
     {
-        $invoice      = $event->invoice;      // the overdue renewal invoice
+        $invoice = $event->invoice;      // the overdue renewal invoice
         $subscription = $event->subscription;
-        $attempt      = $event->attempt;      // which retry milestone this is
+        $attempt = $event->attempt;      // which retry milestone this is
 
         Log::info('Dunning retry', [
             'subscription_id' => $subscription->id,
@@ -96,7 +96,7 @@ class RevokeAccessOnSuspend implements ShouldQueue
     public function handle(SubscriptionSuspended $event): void
     {
         $subscription = $event->subscription;
-        $subscriber   = $subscription->subscriber;
+        $subscriber = $subscription->subscriber;
 
         Log::warning('Subscription suspended — revoking access', [
             'subscription_id' => $subscription->id,

@@ -51,7 +51,7 @@ class ChargeRenewalInvoice implements ShouldQueue
         }
 
         $subscription = $invoice->subscription;
-        $subscriber   = $subscription->subscriber;
+        $subscriber = $subscription->subscriber;
 
         // Charge whatever payment method the subscriber has on file. Tashil
         // never stores cards — that's your gateway's vault.
@@ -109,9 +109,9 @@ class SendRenewalReceipt implements ShouldQueue
         $subscription = $event->subscription;
 
         Log::info('Subscription renewed', [
-            'subscription_id'  => $subscription->id,
-            'invoice_id'       => $event->invoice->id,
-            'next_renewal'     => $subscription->current_period_end,
+            'subscription_id' => $subscription->id,
+            'invoice_id'      => $event->invoice->id,
+            'next_renewal'    => $subscription->current_period_end,
         ]);
 
         // $subscription->subscriber->notify(new RenewalReceiptNotification($event->invoice));
