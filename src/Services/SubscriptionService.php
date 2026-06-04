@@ -31,11 +31,13 @@ use Foysal50x\Tashil\Managers\DatabaseManager;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
+use Foysal50x\Tashil\Traits\DispatchesEventsAfterCommit;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 
 class SubscriptionService
 {
+    use DispatchesEventsAfterCommit;
+
     public function __construct(
         protected DatabaseManager $db,
         protected SubscriptionRepositoryInterface $subscriptionRepo,
@@ -500,7 +502,15 @@ class SubscriptionService
                 $this->billing->issueInitialInvoice($subscription);
             }
 
-            $this->dispatchAfterCommit(fn () => TrialConverted::dispatch($subscription));
+            // A converted trial transitions OnTrial → Active, so it flows
+            // through the standard activation event path too. The initial
+            // invoice (priced plans) is freshly issued and still unpaid, so
+            // pass a null invoice — matching the free-plan activation in
+            // provision() — rather than implying a payment drove this.
+            $this->dispatchAfterCommit(function () use ($subscription) {
+                TrialConverted::dispatch($subscription);
+                SubscriptionActivated::dispatch($subscription, null);
+            });
 
             return $subscription;
         });
@@ -898,16 +908,5 @@ class SubscriptionService
             Period::Year  => $start->copy()->addYears($interval),
             default       => $start->copy()->addMonth(),
         };
-    }
-
-    protected function dispatchAfterCommit(\Closure $dispatcher): void
-    {
-        if (Config::get('tashil.events.async', true)) {
-            DB::afterCommit($dispatcher);
-
-            return;
-        }
-
-        $dispatcher();
     }
 }

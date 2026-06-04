@@ -8,8 +8,8 @@ use Foysal50x\Tashil\Enums\UsageOperation;
 use Foysal50x\Tashil\Events\UsageReset;
 use Foysal50x\Tashil\Managers\DatabaseManager;
 use Foysal50x\Tashil\Models\FeatureUsage;
+use Foysal50x\Tashil\Traits\DispatchesEventsAfterCommit;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -26,6 +26,8 @@ use Throwable;
  */
 class Resetter
 {
+    use DispatchesEventsAfterCommit;
+
     public const DEFAULT_BATCH_SIZE = 100;
 
     public function __construct(
@@ -96,16 +98,5 @@ class Resetter
         if ($usage->feature) {
             $this->dispatchAfterCommit(fn () => UsageReset::dispatch($subscription, $usage->feature, $previousUsage));
         }
-    }
-
-    protected function dispatchAfterCommit(\Closure $dispatcher): void
-    {
-        if (Config::get('tashil.events.async', true)) {
-            DB::afterCommit($dispatcher);
-
-            return;
-        }
-
-        $dispatcher();
     }
 }

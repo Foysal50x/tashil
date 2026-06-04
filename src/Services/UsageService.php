@@ -17,14 +17,16 @@ use Foysal50x\Tashil\Managers\DatabaseManager;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\FeatureUsage;
 use Foysal50x\Tashil\Models\Subscription;
+use Foysal50x\Tashil\Traits\DispatchesEventsAfterCommit;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
 class UsageService
 {
+    use DispatchesEventsAfterCommit;
+
     public function __construct(
         protected DatabaseManager $db,
         protected FeatureUsageRepositoryInterface $usageRepo,
@@ -482,17 +484,6 @@ class UsageService
         if ($newUsage >= $threshold && $previousUsage < $threshold) {
             $this->dispatchAfterCommit(fn () => UsageLimitWarning::dispatch($subscription, $feature, $newUsage, $limit));
         }
-    }
-
-    protected function dispatchAfterCommit(\Closure $dispatcher): void
-    {
-        if (Config::get('tashil.events.async', true)) {
-            DB::afterCommit($dispatcher);
-
-            return;
-        }
-
-        $dispatcher();
     }
 
     /**

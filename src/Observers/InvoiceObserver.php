@@ -12,11 +12,13 @@ use Foysal50x\Tashil\Events\SubscriptionRenewed;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator;
 use Foysal50x\Tashil\Services\SubscriptionService;
+use Foysal50x\Tashil\Traits\DispatchesEventsAfterCommit;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 
 class InvoiceObserver
 {
+    use DispatchesEventsAfterCommit;
+
     public function creating(Invoice $invoice): void
     {
         if (empty($invoice->invoice_number)) {
@@ -102,16 +104,5 @@ class InvoiceObserver
         }
 
         $this->dispatchAfterCommit(fn () => InvoicePaid::dispatch($invoice));
-    }
-
-    protected function dispatchAfterCommit(\Closure $dispatcher): void
-    {
-        if (Config::get('tashil.events.async', true)) {
-            DB::afterCommit($dispatcher);
-
-            return;
-        }
-
-        $dispatcher();
     }
 }

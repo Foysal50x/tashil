@@ -2,6 +2,7 @@
 
 use Foysal50x\Tashil\Enums\Period;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
+use Foysal50x\Tashil\Events\SubscriptionActivated;
 use Foysal50x\Tashil\Events\SubscriptionPaused;
 use Foysal50x\Tashil\Events\SubscriptionUnpaused;
 use Foysal50x\Tashil\Events\TrialConverted;
@@ -85,6 +86,27 @@ it('converts a trial to active, stamps trial_converted_at, and dispatches TrialC
     expect($result->trial_converted_at)->not->toBeNull();
     expect(subscriptionEventCount($sub->id, 'trial.converted'))->toBe(1);
     Event::assertDispatched(TrialConverted::class);
+});
+
+it('also dispatches SubscriptionActivated when a trial converts (OnTrial → Active)', function () {
+    Event::fake([SubscriptionActivated::class]);
+
+    $sub = Subscription::factory()->create([
+        'status'             => SubscriptionStatus::OnTrial,
+        'trial_started_at'   => now()->subDays(2),
+        'trial_ends_at'      => now()->addDays(10),
+        'trial_converted_at' => null,
+    ]);
+
+    Tashil::subscription()->convertTrial($sub);
+
+    // A converted trial flows through the standard activation event path so
+    // activation listeners are not skipped. The invoice is null — the just-
+    // issued initial invoice is unpaid, no payment drove this transition.
+    Event::assertDispatched(
+        SubscriptionActivated::class,
+        fn ($e) => $e->subscription->id === $sub->id && $e->invoice === null,
+    );
 });
 
 it('does not convert a subscription that is not on trial', function () {
