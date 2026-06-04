@@ -99,6 +99,19 @@ class EloquentFeatureUsageRepository implements FeatureUsageRepositoryInterface
         return (float) $usage->usage;
     }
 
+    public function reanchorPeriods(Subscription $subscription, \DateTimeInterface $now): void
+    {
+        FeatureUsage::query()
+            ->where('subscription_id', $subscription->id)
+            ->get()
+            ->each(function (FeatureUsage $usage) use ($now) {
+                $usage->update([
+                    'period_start' => $now,
+                    'period_end'   => self::nextPeriodEnd($usage->reset_period, $now, $now),
+                ]);
+            });
+    }
+
     /**
      * Cap on how many periods we'll advance in one nextPeriodEnd call.
      * Under the expected cron cadence this loop runs once or twice; any

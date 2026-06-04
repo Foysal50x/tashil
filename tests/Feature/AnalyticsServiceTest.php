@@ -138,15 +138,16 @@ it('returns trial conversion rate', function () {
     $user1 = createUser();
     $user2 = createUser();
 
-    // Converted trial
+    // Converted trial — conversion is recorded by trial_converted_at.
     Subscription::create([
-        'subscriber_type' => get_class($user1),
-        'subscriber_id'   => $user1->id,
-        'package_id'      => $this->package->id,
-        'status'          => SubscriptionStatus::Active,
-        'starts_at'       => now()->subMonth(),
-        'ends_at'         => now()->addMonth(),
-        'trial_ends_at'   => now()->subDays(7),
+        'subscriber_type'    => get_class($user1),
+        'subscriber_id'      => $user1->id,
+        'package_id'         => $this->package->id,
+        'status'             => SubscriptionStatus::Active,
+        'starts_at'          => now()->subMonth(),
+        'ends_at'            => now()->addMonth(),
+        'trial_ends_at'      => now()->subDays(7),
+        'trial_converted_at' => now()->subDays(7),
     ]);
 
     // Still on trial

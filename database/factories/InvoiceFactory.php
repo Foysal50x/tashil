@@ -2,6 +2,7 @@
 
 namespace Foysal50x\Tashil\Database\Factories;
 
+use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Subscription;
@@ -15,6 +16,7 @@ class InvoiceFactory extends Factory
     {
         return [
             'subscription_id' => Subscription::factory(),
+            'kind'            => InvoiceKind::Renewal,
             'amount'          => $this->faker->randomFloat(2, 10, 500),
             'currency'        => 'USD',
             'status'          => InvoiceStatus::Pending,

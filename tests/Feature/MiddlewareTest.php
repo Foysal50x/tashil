@@ -58,7 +58,7 @@ it('subscribed middleware aborts 403 when no valid subscription', function () {
 
 it('subscribed middleware passes when subscriber holds a valid subscription', function () {
     app(Tashil::class)->resolveSubscribableUsing(fn () => $this->user);
-    app('tashil')->subscription()->subscribe($this->user, $this->pro);
+    subscribeActive($this->user, $this->pro);
 
     $this->get('/test/subscribed')->assertOk()->assertSee('ok');
 });

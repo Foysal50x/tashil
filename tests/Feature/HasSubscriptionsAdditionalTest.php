@@ -6,6 +6,10 @@ use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 
 beforeEach(function () {
+    // Trait-surface suite — run in legacy (immediate-active) mode; strict
+    // activate-on-payment is covered by ActivationFlowTest.
+    config()->set('tashil.billing.activate_on_payment', false);
+
     $this->loadMigrationsFrom(__DIR__ . '/../Fixtures/create_users_table.php');
 
     $this->feature = Feature::create([

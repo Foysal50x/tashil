@@ -4,6 +4,7 @@ namespace Foysal50x\Tashil\Repositories;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
+use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Support\Query\DateFmt;
 use Illuminate\Database\Eloquent\Collection;
@@ -31,6 +32,24 @@ class EloquentInvoiceRepository implements InvoiceRepositoryInterface
     {
         return Invoice::whereIn('subscription_id', $subscriptionIds)
             ->latest()
+            ->get();
+    }
+
+    public function dueForDunning(\DateTimeInterface $moment): Collection
+    {
+        return Invoice::query()
+            ->where('status', InvoiceStatus::Pending)
+            ->whereNotNull('due_date')
+            ->where('due_date', '<=', $moment)
+            ->whereHas('subscription', function ($q) {
+                $q->whereIn('status', [
+                    SubscriptionStatus::Active,
+                    SubscriptionStatus::PastDue,
+                    SubscriptionStatus::Suspended,
+                ]);
+            })
+            ->with('subscription')
+            ->orderBy('id')
             ->get();
     }
 

@@ -18,6 +18,15 @@ interface InvoiceRepositoryInterface
     public function findBySubscriptionIds(array $subscriptionIds): Collection;
 
     /**
+     * Pending invoices past their due date whose subscription is in a
+     * dunning-eligible state (active / past_due / suspended). Drives
+     * tashil:process-dunning.
+     *
+     * @return Collection<int, Invoice>
+     */
+    public function dueForDunning(\DateTimeInterface $moment): Collection;
+
+    /**
      * Count pending invoices.
      */
     public function pendingCount(): int;

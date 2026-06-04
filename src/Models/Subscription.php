@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Config;
 
 class Subscription extends BaseModel
 {
@@ -35,6 +36,10 @@ class Subscription extends BaseModel
         'cancelled_at'              => 'datetime',
         'cancellation_effective_at' => 'datetime',
         'pending_change_at'         => 'datetime',
+        'activated_at'              => 'datetime',
+        'last_dunning_at'           => 'datetime',
+        'suspended_at'              => 'datetime',
+        'dunning_attempts'          => 'integer',
         'last_event_seq'            => 'integer',
         'auto_renew'                => 'boolean',
         'metadata'                  => 'array',
@@ -91,6 +96,15 @@ class Subscription extends BaseModel
             && (! $this->ends_at || $this->ends_at->isFuture());
     }
 
+    /**
+     * Awaiting first payment. Created by subscribe() for a priced plan under
+     * the activate-on-payment model; has no access until activate() runs.
+     */
+    public function isPending(): bool
+    {
+        return $this->status === SubscriptionStatus::Pending;
+    }
+
     public function isOnTrial(): bool
     {
         return $this->status === SubscriptionStatus::OnTrial
@@ -129,15 +143,18 @@ class Subscription extends BaseModel
     }
 
     /**
-     * The subscriber currently has access. Includes pending-cancellation
-     * (grace period) so that a user who cancelled mid-month keeps using
-     * features until current_period_end / ends_at passes.
+     * The subscriber currently has access. Includes:
+     *  - pending-cancellation (grace) until ends_at passes;
+     *  - past-due (soft dunning) when dunning.keep_access_while_past_due is on.
+     * Suspended never has access; pending (awaiting first payment) never has
+     * access.
      */
     public function isValid(): bool
     {
         return $this->isActive()
             || $this->isOnTrial()
-            || ($this->isPendingCancellation() && (! $this->ends_at || $this->ends_at->isFuture()));
+            || ($this->isPendingCancellation() && (! $this->ends_at || $this->ends_at->isFuture()))
+            || ($this->isPastDue() && (bool) Config::get('tashil.dunning.keep_access_while_past_due', true));
     }
 
     public function hasPendingChange(): bool
@@ -183,12 +200,15 @@ class Subscription extends BaseModel
     }
 
     /**
-     * Subscriptions that still grant access — Active, OnTrial, or
-     * PendingCancellation while the grace window has not elapsed.
+     * Subscriptions that still grant access — Active, OnTrial,
+     * PendingCancellation within grace, and (when soft dunning is enabled)
+     * PastDue. Suspended and Pending are excluded.
      */
     public function scopeValid(Builder $query): Builder
     {
-        return $query->where(function (Builder $q) {
+        $keepPastDue = (bool) Config::get('tashil.dunning.keep_access_while_past_due', true);
+
+        return $query->where(function (Builder $q) use ($keepPastDue) {
             $q->where(function (Builder $q) {
                 $q->where('status', SubscriptionStatus::Active)
                     ->where(function (Builder $q) {
@@ -204,6 +224,10 @@ class Subscription extends BaseModel
                         $q->whereNull('ends_at')->orWhere('ends_at', '>', now());
                     });
             });
+
+            if ($keepPastDue) {
+                $q->orWhere('status', SubscriptionStatus::PastDue);
+            }
         });
     }
 }

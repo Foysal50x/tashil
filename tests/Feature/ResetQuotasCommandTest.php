@@ -25,7 +25,7 @@ beforeEach(function () {
     $package->features()->attach($feature, ['value' => '100']);
 
     $this->user = createUser();
-    $this->sub = Tashil::subscription()->subscribe($this->user, $package);
+    $this->sub = subscribeActive($this->user, $package);
 
     expect(Tashil::usage()->increment($this->sub, 'api', 5))->toBeTrue();
     expect((float) FeatureUsage::where('subscription_id', $this->sub->id)->first()->usage)->toBe(5.0);

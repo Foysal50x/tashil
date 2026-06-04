@@ -47,6 +47,12 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         $this->repository->syncFeatures($subscription, $package);
     }
 
+    public function resyncFeatures(Subscription $subscription, Package $package, bool $carryUsage = true): void
+    {
+        $this->repository->resyncFeatures($subscription, $package, $carryUsage);
+        $this->invalidateSubscriberCache($subscription);
+    }
+
     public function findById(int $id): ?Subscription
     {
         $key = "subscription:{$id}";
@@ -69,6 +75,13 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         return $this->remember($key, function () use ($subscriber, $package) {
             return $this->repository->subscriberHasValidSubscription($subscriber, $package);
         });
+    }
+
+    public function hasLiveSubscription(Subscribable $subscriber): bool
+    {
+        // Not cached — a correctness guard on subscribe() must see writes
+        // immediately.
+        return $this->repository->hasLiveSubscription($subscriber);
     }
 
     public function findCancelledResumable(Subscribable $subscriber): ?Subscription

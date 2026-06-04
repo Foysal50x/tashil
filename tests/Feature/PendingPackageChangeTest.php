@@ -89,7 +89,7 @@ it('applyPendingChange switches the subscriber onto the target package and dispa
     $to = Package::factory()->create(['billing_period' => Period::Month, 'billing_interval' => 1]);
 
     $user = createUser();
-    $sub = Tashil::subscription()->subscribe($user, $from);
+    $sub = subscribeActive($user, $from);
     Tashil::subscription()->scheduleDowngrade($sub, $to);
     $sub->refresh();
 
@@ -127,7 +127,7 @@ it('is a no-op to applyPendingChange when the target package was removed', funct
     $to = Package::factory()->create();
 
     $user = createUser();
-    $sub = Tashil::subscription()->subscribe($user, $from);
+    $sub = subscribeActive($user, $from);
     Tashil::subscription()->scheduleDowngrade($sub, $to);
     $sub->refresh();
 
@@ -146,7 +146,7 @@ it('tashil:apply-pending-changes applies only changes whose effective time has p
     $to = Package::factory()->create();
 
     $user = createUser();
-    $sub = Tashil::subscription()->subscribe($user, $from);
+    $sub = subscribeActive($user, $from);
     Tashil::subscription()->scheduleDowngrade($sub, $to);
 
     // Force the scheduled change to be due (period has elapsed).
@@ -166,7 +166,7 @@ it('tashil:apply-pending-changes leaves not-yet-due changes untouched', function
     $to = Package::factory()->create();
 
     $user = createUser();
-    $sub = Tashil::subscription()->subscribe($user, $from);
+    $sub = subscribeActive($user, $from);
     Tashil::subscription()->scheduleDowngrade($sub, $to);
 
     // Effective date in the future.

@@ -85,9 +85,12 @@ Tashil::package('pro')
 1. One row in `tashil_subscription_features` (immutable snapshot — `feature_slug`, `feature_type`, `value`, `reset_period`, `added_at`).
 2. One row in `tashil_feature_usages` (the counter — `usage=0`, `period_start=now`, `period_end=now + first window`). `limit_value` is populated **only for Limit features** (numeric pivot value coerced to float). Boolean, Consumable, Enum, and Metered counters all carry `limit_value = NULL` — they're either uncapped by design (Consumable, Metered) or don't use a counter for gating (Boolean, Enum).
 
-It also appends `subscription.created` to the event store.
+It also appends `subscription.created` to the event store. (Under the default activate-on-payment model a priced plan subscribes as `Pending`: the snapshot + counter rows are written but gated — no feature access until the initial invoice is paid and `activate()` re-anchors the counters. See [09-Billing-Lifecycle.md](09-Billing-Lifecycle.md).)
 
-If the plan changes later (`switchPlan` / `applyPendingChange`), the old snapshot rows are stamped `superseded_at = now()` and new snapshot rows are inserted with `superseded_at = null`. Both sets stay in the table forever — the snapshot is the audit trail of "what features did this subscription have at time T?".
+If the plan changes later, the old snapshot rows are stamped `superseded_at = now()` and new snapshot rows are inserted with `superseded_at = null`. Both sets stay in the table forever — the snapshot is the audit trail of "what features did this subscription have at time T?". Two mechanisms:
+
+- **`switchPlan()` / `applyPendingChange()`** cancel the old subscription and create a new one (fresh counters).
+- **`changePlan()`** (in-place upgrade/lateral) supersedes + re-writes snapshots on the **same** subscription and **carries usage counters forward** via `resyncFeatures(carryUsage: true)` — the usage value is kept while the cap (`limit_value`) and reset cadence update to the new plan. Counters for features the new plan drops are left in place (no current snapshot ⇒ gating denies) and never deleted.
 
 ## Checking access
 

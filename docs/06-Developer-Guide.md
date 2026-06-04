@@ -221,27 +221,28 @@ Use the idempotency key when the operation can be retried by an outer system (qu
 
 ## Integrating tahsil with the host's billing / payments
 
-The contract: tahsil owns subscription state and invoice issuance; the host owns money movement.
+The contract: tahsil owns subscription state, invoice issuance, and the activation/renewal/dunning state machine; the host owns money movement. The **full lifecycle** (activation, renewal, dunning, reactivation, proration, pause) is documented in [09-Billing-Lifecycle.md](09-Billing-Lifecycle.md); the renewal slice:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Tahsil                                                     │
-│  - Issues Invoice (status=pending)                          │
+│  - Issues Invoice (status=pending, kind=initial|renewal|…)  │
 │  - Fires InvoiceIssued                                      │
 ├─────────────────────────────────────────────────────────────┤
 │  Host listener                                              │
 │  - Charges card via Stripe/Paddle/…                         │
 │  - On success → $invoice->markAsPaid()                      │
 ├─────────────────────────────────────────────────────────────┤
-│  Tahsil InvoiceObserver                                     │
-│  - On status → Paid:                                        │
-│    - SubscriptionService::advancePeriod($sub)               │
-│    - Append subscription.renewed                            │
-│    - Dispatch SubscriptionRenewed + InvoicePaid             │
+│  Tahsil InvoiceObserver — routes by invoice.kind + status:  │
+│  - initial + Pending          → activate()  (first access)  │
+│  - renewal + Active/OnTrial    → advancePeriod() + renewed   │
+│  - lapsed (past_due/…)         → reactivate()                │
+│  - proration / initial-active  → no period change            │
+│  - always → InvoicePaid                                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-For dunning, gateway webhook reconciliation, refund execution, the host wires the equivalent listeners. Tahsil's job ends at issuing the bill and reflecting the host's `markAsPaid` decision.
+For the failed-payment retry *charge* and gateway webhook reconciliation / refund execution, the host wires listeners on `SubscriptionPastDue` / `InvoiceOverdue` / `SubscriptionSuspended`. Tahsil owns the dunning *state machine and schedule* (`tashil:process-dunning`); it issues the bill, escalates the lifecycle, and reflects the host's `markAsPaid` decision — it never charges.
 
 When recording transactions, pass the gateway-supplied id through (Stripe `ch_…`, Paddle `txn_…`, etc.). The `UNIQUE(gateway, transaction_id)` constraint on `tashil_transactions` makes duplicate webhook deliveries safe — a second insert with the same pair throws `UniqueConstraintViolationException`, which the host should treat as "already recorded, ignore." For non-gateway payments (cash, manual bank transfer), leave `transaction_id` empty and `TransactionObserver::creating` will stamp a `TXN-…` id from `tashil.transaction.generator`.
 

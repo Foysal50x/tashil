@@ -30,7 +30,7 @@ On subscribe, tahsil writes **two** rows per feature:
 - An immutable **snapshot** (`tashil_subscription_features`) — the feature config frozen at subscription time, retained forever for audit.
 - A mutable **counter** (`tashil_feature_usages`) — current usage, limit cached for atomic updates, period window for reset scheduling.
 
-If the plan changes later, old snapshot rows are stamped with `superseded_at` and new snapshots are added — the history is preserved.
+If the plan changes later, old snapshot rows are stamped with `superseded_at` and new snapshots are added — the history is preserved. An in-place `changePlan()` upgrade re-snapshots from the new plan **carrying the current usage value forward** (the counter isn't reset), so a mid-period upgrade keeps what's already been consumed.
 
 ## 2. Check access
 
@@ -48,7 +48,7 @@ if (app('tashil')->usage()->check($subscription, 'api-requests')) {
 
 Access is denied automatically when:
 
-- The subscription isn't valid (`isValid()` returns false — covers expired, cancelled, paused, suspended).
+- The subscription isn't valid (`isValid()` returns false — covers `Pending` (gated, not yet paid), expired, cancelled, paused, suspended; `PastDue` depends on `tashil.dunning.keep_access_while_past_due`).
 - The catalog `Feature.is_active` is false (so admins can disable a feature globally without per-subscription cleanup).
 - The counter has reached its limit.
 

@@ -28,6 +28,11 @@ class PackageBuilder
 
     protected int $trialDays = 0;
 
+    // null = "caller didn't choose" → defer to the install-wide default seeded
+    // in Package::booted() from tashil.billing.activate_on_payment. Only a
+    // call to requiresPayment() pins an explicit value.
+    protected ?bool $requiresPayment = null;
+
     protected bool $isActive = true;
 
     protected bool $isFeatured = false;
@@ -120,6 +125,19 @@ class PackageBuilder
     public function trialDays(int $days): self
     {
         $this->trialDays = $days;
+
+        return $this;
+    }
+
+    /**
+     * Whether this plan requires the initial invoice to be paid before access
+     * begins. When not called, the package inherits the install-wide default
+     * (tashil.billing.activate_on_payment, seeded at creation). Set false for
+     * free/offline/enterprise plans that should activate immediately.
+     */
+    public function requiresPayment(bool $requires = true): self
+    {
+        $this->requiresPayment = $requires;
 
         return $this;
     }
@@ -232,10 +250,15 @@ class PackageBuilder
 
     /**
      * Get the package attributes array without persisting.
+     *
+     * requires_payment is included only when the caller pinned it via
+     * requiresPayment(). Left out otherwise so Package::booted() seeds it from
+     * the install-wide default on create, and so createOrUpdate() never
+     * clobbers an existing package's flag when the caller didn't set one.
      */
     public function toArray(): array
     {
-        return [
+        $attributes = [
             'slug'             => $this->slug,
             'name'             => $this->name,
             'description'      => $this->description,
@@ -250,6 +273,12 @@ class PackageBuilder
             'sort_order'       => $this->sortOrder,
             'metadata'         => $this->metadata,
         ];
+
+        if ($this->requiresPayment !== null) {
+            $attributes['requires_payment'] = $this->requiresPayment;
+        }
+
+        return $attributes;
     }
 
     protected function attachFeatures(Package $package): void

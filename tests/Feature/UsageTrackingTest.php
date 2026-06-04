@@ -34,7 +34,7 @@ beforeEach(function () {
     $package->features()->attach($this->booleanFeature, ['value' => 'true']);
 
     $user = createUser();
-    $this->subscription = app('tashil')->subscription()->subscribe($user, $package);
+    $this->subscription = subscribeActive($user, $package);
 });
 
 function usageFor($subscription, string $slug): ?FeatureUsage
@@ -145,7 +145,7 @@ it('reportStorage updates absolute usage', function () {
     $package->features()->attach($storage, ['value' => '1000']);
 
     $user = createUser();
-    $sub = app('tashil')->subscription()->subscribe($user, $package);
+    $sub = subscribeActive($user, $package);
 
     app('tashil')->usage()->reportStorage($sub, 'storage-gb', 250);
     expect(usageFor($sub, 'storage-gb')->usage)->toBe(250.0);

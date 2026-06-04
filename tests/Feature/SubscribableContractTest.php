@@ -28,7 +28,7 @@ it('User implements Subscribable', function () {
 
 it('resolveSubscription returns the active subscription by default', function () {
     $user = createUser();
-    $sub = app('tashil')->subscription()->subscribe($user, $this->package);
+    $sub = subscribeActive($user, $this->package);
 
     expect($user->resolveSubscription()?->id)->toBe($sub->id);
 });

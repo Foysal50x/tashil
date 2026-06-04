@@ -1,17 +1,20 @@
 # Scheduler Jobs
 
-Tahsil ships six console commands. The service provider auto-registers them with Laravel's scheduler when `tashil.schedule.enabled` is true (the default). Cadence per command is overridable via `tashil.schedule.overrides`, or you can disable auto-registration and wire commands manually for the Laravel version you're on (see [Disabling auto-registration](#disabling-auto-registration) below — the wiring differs between Laravel 10 and Laravel 11+).
+Tahsil ships seven console commands. The service provider auto-registers them with Laravel's scheduler when `tashil.schedule.enabled` is true (the default). Cadence per command is overridable via `tashil.schedule.overrides`, or you can disable auto-registration and wire commands manually for the Laravel version you're on (see [Disabling auto-registration](#disabling-auto-registration) below — the wiring differs between Laravel 10 and Laravel 11+).
 
 ## Defaults
 
 | Command | Default cron | Purpose | Driving column |
 |---|---|---|---|
-| `tashil:renew-subscriptions` | `5 0 * * *` (daily 00:05) | Issue renewal invoices for auto-renewing subs past period end. | `current_period_end` |
+| `tashil:renew-subscriptions` | `5 0 * * *` (daily 00:05) | Issue renewal invoices for **active** auto-renewing subs past period end (never trials). | `current_period_end` |
 | `tashil:expire-subscriptions` | `*/15 * * * *` | Promote subs past their access window to `Expired`. | `ends_at`, `cancellation_effective_at` |
 | `tashil:expire-trials` | `*/30 * * * *` | Mark trials whose `trial_ends_at` has passed without conversion as `Expired`. | `trial_ends_at`, `trial_converted_at` |
 | `tashil:mark-trials-ending` | `55 7 * * *` (daily 07:55) | Dispatch `TrialEnding` for trials approaching expiry. | `trial_ends_at`, `tashil.trial.warn_days` |
 | `tashil:reset-quotas` | `0 0 * * *` (daily 00:00) | Reset feature usage counters whose `period_end` has elapsed. | `period_end`, `reset_period` |
 | `tashil:apply-pending-changes` | `*/5 * * * *` | Apply scheduled package changes (e.g. queued downgrades). | `pending_change_at` |
+| `tashil:process-dunning` | `*/30 * * * *` | Escalate unpaid overdue invoices: past-due → suspended → expired. | invoice `due_date`, `dunning_attempts`, `suspended_at` |
+
+`tashil:process-dunning` drives the failed-payment lifecycle — see [09-Billing-Lifecycle.md › Dunning](09-Billing-Lifecycle.md#dunning-tashilprocess-dunning) for the retry schedule, suspension, and config (`tashil.dunning.*`). It is a no-op when `tashil.dunning.enabled = false`.
 
 All commands accept a `--date=Y-m-d H:i:s` option to run as-of an arbitrary moment — handy for tests and one-off backfills.
 

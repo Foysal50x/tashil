@@ -116,19 +116,32 @@ class RenewSubscriptionsCommand extends Command
             return false;
         }
 
-        return in_array(
-            $subscription->status,
-            [SubscriptionStatus::Active, SubscriptionStatus::OnTrial],
-            true,
-        );
+        // Active only — a trial is billed at conversion, never by the
+        // renewal cron, so OnTrial never qualifies here.
+        return $subscription->status === SubscriptionStatus::Active;
     }
 
     protected function extendGrace(Subscription $subscription): void
     {
+        $max = (int) Config::get('tashil.renewal.max_grace_extensions', 3);
+
+        // Without a cap, a never-paid invoice would extend the period on
+        // every run forever. dunning_attempts is reused as the extension
+        // counter; once exhausted we stop extending and let the dunning /
+        // expire jobs take the subscription down.
+        if ($subscription->dunning_attempts >= $max) {
+            Log::info("tashil:renew-subscriptions grace exhausted for {$subscription->id} (>= {$max} extensions); leaving to dunning");
+
+            return;
+        }
+
         $days = (int) Config::get('tashil.renewal.grace_days', 3);
         $newEnd = ($subscription->current_period_end ?? now())->copy()->addDays($days);
 
-        $subscription->update(['current_period_end' => $newEnd]);
+        $subscription->update([
+            'current_period_end' => $newEnd,
+            'dunning_attempts'   => $subscription->dunning_attempts + 1,
+        ]);
 
         Log::info("tashil:renew-subscriptions extended grace for {$subscription->id} until {$newEnd}");
     }

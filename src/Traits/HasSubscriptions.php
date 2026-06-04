@@ -175,6 +175,23 @@ trait HasSubscriptions
         return app('tashil')->subscription()->switchPlan($subscription, $newPackage);
     }
 
+    /**
+     * Change the active subscription's plan in place — upgrades apply now
+     * (prorated by default), downgrades schedule at period end. Unlike
+     * switchPlan(), the same subscription row and its usage are kept.
+     */
+    public function changePlan(Package $newPackage, bool $prorate = true): ?Subscription
+    {
+        $subscription = $this->loadSubscription();
+        if (! $subscription) {
+            return null;
+        }
+
+        $this->clearSubscriptionCache();
+
+        return app('tashil')->subscription()->changePlan($subscription, $newPackage, $prorate);
+    }
+
     public function pauseSubscription(): ?Subscription
     {
         $subscription = $this->loadSubscription();

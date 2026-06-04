@@ -47,7 +47,7 @@ it('switching from an active (non-trial) subscription does not grant a trial on 
     $to = Package::factory()->create(['billing_period' => Period::Month, 'trial_days' => 30]);
 
     $user = createUser();
-    Tashil::subscription()->subscribe($user, $from);
+    subscribeActive($user, $from);
 
     $newSub = $user->switchPlan($to);
 

@@ -192,24 +192,28 @@ class UsageService
             return false;
         }
 
-        $previousUsage = (float) $usage->usage;
-        $newUsage = $this->usageRepo->reportAbsolute($usage, $amount);
+        // Wrap the counter write + log in one transaction so they can't
+        // desync (every mutating service method is transactional).
+        return (bool) $this->db->connection()->transaction(function () use ($subscription, $usage, $feature, $amount) {
+            $previousUsage = (float) $usage->usage;
+            $newUsage = $this->usageRepo->reportAbsolute($usage, $amount);
 
-        $this->logRepo->create([
-            'subscription_id' => $subscription->id,
-            'feature_id'      => $usage->feature_id,
-            'operation'       => UsageOperation::Report->value,
-            'amount'          => $amount,
-            'previous_usage'  => $previousUsage,
-            'new_usage'       => $newUsage,
-            'description'     => 'Storage report',
-        ]);
+            $this->logRepo->create([
+                'subscription_id' => $subscription->id,
+                'feature_id'      => $usage->feature_id,
+                'operation'       => UsageOperation::Report->value,
+                'amount'          => $amount,
+                'previous_usage'  => $previousUsage,
+                'new_usage'       => $newUsage,
+                'description'     => 'Storage report',
+            ]);
 
-        if ($feature) {
-            $this->maybeFireLimitWarning($subscription, $usage, $feature, $previousUsage, $newUsage);
-        }
+            if ($feature) {
+                $this->maybeFireLimitWarning($subscription, $usage, $feature, $previousUsage, $newUsage);
+            }
 
-        return true;
+            return true;
+        });
     }
 
     public function resetUsage(Subscription $subscription, string $featureSlug): bool
@@ -220,30 +224,41 @@ class UsageService
         }
 
         $this->db->connection()->transaction(function () use ($subscription, $usage) {
-            $previousUsage = (float) $usage->usage;
-            $this->usageRepo->resetUsage($usage);
-
-            $this->logRepo->create([
-                'subscription_id' => $subscription->id,
-                'feature_id'      => $usage->feature_id,
-                'operation'       => UsageOperation::Reset->value,
-                'amount'          => 0,
-                'previous_usage'  => $previousUsage,
-                'new_usage'       => 0,
-                'description'     => 'Usage reset',
-            ]);
-
-            $this->eventStore->append($subscription, 'usage.reset', [
-                'feature_id'     => $usage->feature_id,
-                'previous_usage' => $previousUsage,
-            ]);
-
-            if ($usage->feature) {
-                $this->dispatchAfterCommit(fn () => UsageReset::dispatch($subscription, $usage->feature, $previousUsage));
-            }
+            $this->performReset($subscription, $usage);
         });
 
         return true;
+    }
+
+    /**
+     * Zero a counter and advance its window, writing the reset log row and
+     * usage.reset event. Shared by the manual reset, the scheduled reset, and
+     * the inline reset in consumeCounter — so every reset (including the lazy
+     * one) is captured for replay. Caller wraps this in a transaction.
+     */
+    protected function performReset(Subscription $subscription, FeatureUsage $usage): void
+    {
+        $previousUsage = (float) $usage->usage;
+        $this->usageRepo->resetUsage($usage);
+
+        $this->logRepo->create([
+            'subscription_id' => $subscription->id,
+            'feature_id'      => $usage->feature_id,
+            'operation'       => UsageOperation::Reset->value,
+            'amount'          => 0,
+            'previous_usage'  => $previousUsage,
+            'new_usage'       => 0,
+            'description'     => 'Usage reset',
+        ]);
+
+        $this->eventStore->append($subscription, 'usage.reset', [
+            'feature_id'     => $usage->feature_id,
+            'previous_usage' => $previousUsage,
+        ]);
+
+        if ($usage->feature) {
+            $this->dispatchAfterCommit(fn () => UsageReset::dispatch($subscription, $usage->feature, $previousUsage));
+        }
     }
 
     public function resetAllUsage(Subscription $subscription): void
@@ -257,35 +272,40 @@ class UsageService
         Feature $feature,
         float $amount,
     ): bool {
-        // Inline reset for expired quotas so increment() doesn't fail
-        // against a stale counter when the cron is late. The reset is
-        // wrapped in the same transaction as the increment so a row
-        // can't end up half-reset.
-        if ($this->hasExpiredPeriod($usage)) {
-            $this->usageRepo->resetUsage($usage);
-            $usage->refresh();
-        }
+        // Reset + increment + log run in one transaction so a row can't end
+        // up half-reset and so the consume log is atomic with the counter.
+        return (bool) $this->db->connection()->transaction(function () use ($subscription, $usage, $feature, $amount) {
+            // Inline reset for an expired quota so increment() doesn't fail
+            // against a stale counter when the cron is late. Goes through
+            // performReset so it writes a reset log + usage.reset event —
+            // without this, a lazily-reset counter would be invisible to
+            // log-replay (the new_usage deltas would not reconcile).
+            if ($this->hasExpiredPeriod($usage)) {
+                $this->performReset($subscription, $usage);
+                $usage->refresh();
+            }
 
-        $previousUsage = (float) $usage->usage;
-        $newUsage = $this->usageRepo->atomicIncrement($usage, $amount);
+            $previousUsage = (float) $usage->usage;
+            $newUsage = $this->usageRepo->atomicIncrement($usage, $amount);
 
-        if ($newUsage === null) {
-            return false;
-        }
+            if ($newUsage === null) {
+                return false;
+            }
 
-        $this->logRepo->create([
-            'subscription_id' => $subscription->id,
-            'feature_id'      => $usage->feature_id,
-            'operation'       => UsageOperation::Consume->value,
-            'amount'          => $amount,
-            'previous_usage'  => $previousUsage,
-            'new_usage'       => $newUsage,
-            'description'     => 'Usage increment',
-        ]);
+            $this->logRepo->create([
+                'subscription_id' => $subscription->id,
+                'feature_id'      => $usage->feature_id,
+                'operation'       => UsageOperation::Consume->value,
+                'amount'          => $amount,
+                'previous_usage'  => $previousUsage,
+                'new_usage'       => $newUsage,
+                'description'     => 'Usage increment',
+            ]);
 
-        $this->maybeFireLimitWarning($subscription, $usage, $feature, $previousUsage, $newUsage);
+            $this->maybeFireLimitWarning($subscription, $usage, $feature, $previousUsage, $newUsage);
 
-        return true;
+            return true;
+        });
     }
 
     /**

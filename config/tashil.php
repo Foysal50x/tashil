@@ -18,7 +18,7 @@ return [
         // The database connection to use for Tashil tables.
         // If null, the default application connection will be used.
         // You can define a separate connection in config/database.php.
-        'connection' => env('DB_CONNECTION', null),
+        'connection' => env('TASHIL_DB_CONNECTION', null),
 
         // Table prefix for all Tashil tables.
         // This prefix will be prepended to the table names defined below.
@@ -58,6 +58,32 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Billing model
+    |--------------------------------------------------------------------------
+    |
+    | activate_on_payment      : the CREATION-TIME default for a package's
+    |   `requires_payment` flag — not a runtime switch. When true (default), a
+    |   new package is created with requires_payment=true, so it subscribes as
+    |   `pending` and access begins only when its initial invoice is paid
+    |   (strict activate-on-payment). Set false to make new packages default to
+    |   the legacy "access first, bill later" model. The PACKAGE is authoritative
+    |   at runtime: changing this later only affects packages created afterwards;
+    |   a package explicitly marked requires_payment=true keeps gating regardless.
+    |   Override per package by passing requires_payment when creating it.
+    | initial_invoice_due_days : due window for the initial invoice. Shorter
+    |   than renewal because a pending subscription has no access yet.
+    | min_proration_amount     : skip issuing a proration invoice below this
+    |   amount (avoids dust invoices on near-period-end upgrades).
+    |
+    */
+    'billing' => [
+        'activate_on_payment'      => env('TASHIL_ACTIVATE_ON_PAYMENT', true),
+        'initial_invoice_due_days' => env('TASHIL_INITIAL_INVOICE_DUE_DAYS', 1),
+        'min_proration_amount'     => env('TASHIL_MIN_PRORATION', 0.50),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Renewal
     |--------------------------------------------------------------------------
     |
@@ -67,11 +93,42 @@ return [
     |   - 'skip'          (do nothing, retry next run)
     |   - 'extend_grace'  (push current_period_end by grace_days and try again)
     | grace_days         : extension applied when policy is 'extend_grace'.
+    | max_grace_extensions : cap on how many times 'extend_grace' may push the
+    |   period before giving up — prevents an unpaid invoice from extending
+    |   access forever.
     |
     */
     'renewal' => [
-        'on_pending_invoice' => env('TASHIL_RENEWAL_ON_PENDING_INVOICE', 'cancel'),
-        'grace_days'         => env('TASHIL_RENEWAL_GRACE_DAYS', 3),
+        'on_pending_invoice'   => env('TASHIL_RENEWAL_ON_PENDING_INVOICE', 'cancel'),
+        'grace_days'           => env('TASHIL_RENEWAL_GRACE_DAYS', 3),
+        'max_grace_extensions' => env('TASHIL_RENEWAL_MAX_GRACE_EXTENSIONS', 3),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Dunning
+    |--------------------------------------------------------------------------
+    |
+    | enabled                    : run the dunning lifecycle for unpaid
+    |   invoices past their due date (tashil:process-dunning).
+    | retry_days                 : days after due_date at which a dunning
+    |   attempt fires (host listens to SubscriptionPastDue / InvoiceOverdue and
+    |   re-charges). Each milestone increments the attempt counter.
+    | suspend_after_attempts     : suspend the subscription (cut access) once
+    |   the attempt count reaches this value.
+    | cancel_after_suspend_days  : expire a suspended subscription this many
+    |   days after suspension if still unpaid.
+    | keep_access_while_past_due : whether a past_due subscription retains
+    |   access during the retry window (soft dunning). Suspended never has
+    |   access regardless.
+    |
+    */
+    'dunning' => [
+        'enabled'                    => env('TASHIL_DUNNING_ENABLED', true),
+        'retry_days'                 => [1, 3, 5],
+        'suspend_after_attempts'     => env('TASHIL_DUNNING_SUSPEND_AFTER', 3),
+        'cancel_after_suspend_days'  => env('TASHIL_DUNNING_CANCEL_AFTER', 7),
+        'keep_access_while_past_due' => env('TASHIL_PASTDUE_KEEP_ACCESS', true),
     ],
 
     /*

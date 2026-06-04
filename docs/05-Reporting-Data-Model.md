@@ -57,18 +57,23 @@ The event log + snapshot tables are the source of truth for "what happened?" que
 Append-only, monotonic per subscription. Every state transition produced by `SubscriptionService` and friends writes one row. Common event types:
 
 ```
-subscription.created
+subscription.created          (payload: status, requires_payment, with_trial, …)
+subscription.activated        (payload: invoice_id) — pending → active on first payment
 subscription.cancelled        (payload: immediate, reason)
 subscription.resumed
 subscription.expired
+subscription.past_due         (payload: invoice_id, attempt) — entered/advanced dunning
+subscription.suspended        — dunning retries exhausted, access cut
+subscription.reactivated      (payload: invoice_id) — recovered a lapse by payment
 subscription.switched         (payload: new_subscription_id, new_package_id, new_package_slug)
-subscription.paused / .unpaused
+subscription.plan_changed     (payload: old_package_id, new_package_id, proration_amount) — in-place upgrade
+subscription.paused           (payload: remaining_seconds) / .unpaused
 subscription.renewed          (payload: new_period_end)
 subscription.pending_change_scheduled / .pending_change_cancelled
 trial.ending                  (payload: days_remaining)
 trial.converted
 trial.expired
-usage.reset                   (payload: feature_id, previous_usage)
+usage.reset                   (payload: feature_id, previous_usage) — incl. lazy inline resets
 usage.metered_charged         (payload: feature_id, units, unit_price, amount, currency)
 ```
 

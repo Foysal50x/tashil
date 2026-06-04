@@ -39,6 +39,12 @@ class CacheInvoiceRepository extends BaseCacheRepository implements InvoiceRepos
         return $this->repository->findBySubscriptionIds($subscriptionIds);
     }
 
+    public function dueForDunning(\DateTimeInterface $moment): Collection
+    {
+        // Scheduler scan — never cached, always hits the source.
+        return $this->repository->dueForDunning($moment);
+    }
+
     public function pendingCount(): int
     {
         $key = 'invoice:aggregate:pending_count';

@@ -47,4 +47,11 @@ interface FeatureUsageRepositoryInterface
      * @return float the new usage value.
      */
     public function reportAbsolute(FeatureUsage $usage, float $amount): float;
+
+    /**
+     * Re-anchor every counter's reset window to start at $now. Used on
+     * activation so the first quota period aligns with the moment access
+     * actually begins (first payment) rather than the earlier subscribe time.
+     */
+    public function reanchorPeriods(Subscription $subscription, \DateTimeInterface $now): void;
 }

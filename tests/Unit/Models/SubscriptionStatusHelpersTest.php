@@ -33,7 +33,7 @@ it('detects suspended subscription', function () {
     expect($subscription->isValid())->toBeFalse();
 });
 
-it('detects past due subscription', function () {
+it('detects past due subscription and gates access by the dunning config', function () {
     $subscription = Subscription::create([
         'subscriber_type' => get_class($this->user),
         'subscriber_id'   => $this->user->id,
@@ -45,6 +45,13 @@ it('detects past due subscription', function () {
 
     expect($subscription->isPastDue())->toBeTrue();
     expect($subscription->isActive())->toBeFalse();
+
+    // Soft dunning (default): past_due retains access during the retry window.
+    config()->set('tashil.dunning.keep_access_while_past_due', true);
+    expect($subscription->isValid())->toBeTrue();
+
+    // Hard dunning: access is cut immediately on past_due.
+    config()->set('tashil.dunning.keep_access_while_past_due', false);
     expect($subscription->isValid())->toBeFalse();
 });
 

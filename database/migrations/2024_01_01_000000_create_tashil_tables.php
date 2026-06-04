@@ -45,6 +45,12 @@ return new class extends Migration
             $table->string('billing_period')->default('month');
             $table->integer('billing_interval')->default(1);
             $table->integer('trial_days')->default(0);
+
+            // When true (default), a priced plan subscribes as `pending` and
+            // access begins only when its initial invoice is paid. Set false
+            // for free/offline/enterprise plans that activate immediately.
+            $table->boolean('requires_payment')->default(true);
+
             $table->boolean('is_active')->default(true);
             $table->boolean('is_featured')->default(false);
             $table->integer('sort_order')->default(0);
@@ -117,6 +123,13 @@ return new class extends Migration
             $table->string('cancellation_reason')->nullable();
             $table->boolean('auto_renew')->default(true);
 
+            // Activation (pending → active on first paid invoice) and the
+            // dunning cycle for failed renewals.
+            $table->timestamp('activated_at')->nullable();
+            $table->unsignedInteger('dunning_attempts')->default(0);
+            $table->timestamp('last_dunning_at')->nullable();
+            $table->timestamp('suspended_at')->nullable();
+
             // Event-store cursor (per-subscription monotonic sequence)
             $table->unsignedBigInteger('last_event_seq')->default(0);
 
@@ -129,6 +142,7 @@ return new class extends Migration
             $table->index(['status', 'ends_at']);
             $table->index(['status', 'trial_ends_at']);
             $table->index(['status', 'auto_renew', 'current_period_end']);
+            $table->index(['status', 'suspended_at']);
             $table->index('pending_change_at');
         });
 
@@ -213,6 +227,12 @@ return new class extends Migration
             $table->id();
             $table->foreignId('subscription_id')->constrained($subscriptionsTable)->cascadeOnDelete();
             $table->string('invoice_number')->unique();
+
+            // What this invoice bills for — drives InvoiceObserver routing on
+            // payment (initial → activate, renewal → advance period,
+            // proration → no period change, usage → postpaid metering).
+            $table->string('kind')->default('renewal');
+
             $table->decimal('amount', 10, 2);
             $table->string('currency', 3)->default(config('tashil.currency', 'USD'));
             $table->string('status')->default('pending');
@@ -221,11 +241,17 @@ return new class extends Migration
             $table->dateTime('issued_at');
             $table->dateTime('due_date')->nullable();
             $table->dateTime('paid_at')->nullable();
+
+            // Dunning bookkeeping for unpaid invoices past due_date.
+            $table->unsignedInteger('attempts')->default(0);
+            $table->timestamp('last_attempt_at')->nullable();
+
             $table->text('notes')->nullable();
             $table->timestamps();
             $table->softDeletes();
 
             $table->index(['subscription_id', 'status']);
+            $table->index(['status', 'due_date']);
         });
 
         $this->schema()->create($transactionsTable, function (Blueprint $table) use ($invoicesTable) {

@@ -6,6 +6,7 @@ use Foysal50x\Tashil\Console\ApplyPendingChangesCommand;
 use Foysal50x\Tashil\Console\ExpireSubscriptionsCommand;
 use Foysal50x\Tashil\Console\ExpireTrialsCommand;
 use Foysal50x\Tashil\Console\MarkTrialsEndingCommand;
+use Foysal50x\Tashil\Console\ProcessDunningCommand;
 use Foysal50x\Tashil\Console\RenewSubscriptionsCommand;
 use Foysal50x\Tashil\Console\ResetQuotasCommand;
 use Foysal50x\Tashil\Contracts\FeatureRepositoryInterface;
@@ -88,6 +89,7 @@ class TashilServiceProvider extends ServiceProvider
                 MarkTrialsEndingCommand::class,
                 ResetQuotasCommand::class,
                 ApplyPendingChangesCommand::class,
+                ProcessDunningCommand::class,
             ]);
 
             $this->registerSchedule();
@@ -319,6 +321,7 @@ class TashilServiceProvider extends ServiceProvider
                 'tashil:reset-quotas'          => '0 0 * * *',
                 'tashil:apply-pending-changes' => '*/5 * * * *',
                 'tashil:expire-subscriptions'  => '*/15 * * * *',
+                'tashil:process-dunning'       => '*/30 * * * *',
             ];
 
             foreach ($defaults as $command => $cron) {

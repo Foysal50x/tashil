@@ -24,8 +24,20 @@ class PackageFactory extends Factory
             'billing_period'   => Period::Month,
             'billing_interval' => 1,
             'trial_days'       => 0,
-            'is_active'        => true,
-            'sort_order'       => 0,
+            // requires_payment is intentionally NOT set here: Package::booted()
+            // seeds it from tashil.billing.activate_on_payment at creation, so
+            // factory packages inherit the install-wide default like real ones.
+            // Override explicitly (->state(['requires_payment' => ...])) to pin it.
+            'is_active'  => true,
+            'sort_order' => 0,
         ];
+    }
+
+    /**
+     * Pin requires_payment regardless of the install-wide default.
+     */
+    public function requiresPayment(bool $requires = true): static
+    {
+        return $this->state(['requires_payment' => $requires]);
     }
 }

@@ -5,6 +5,10 @@ use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Models\Package;
 
 beforeEach(function () {
+    // Trait-surface suite — run in legacy (immediate-active) mode so a plain
+    // subscribe() yields an active subscription to pause / schedule from.
+    config()->set('tashil.billing.activate_on_payment', false);
+
     $this->loadMigrationsFrom(__DIR__ . '/../Fixtures/create_users_table.php');
 });
 

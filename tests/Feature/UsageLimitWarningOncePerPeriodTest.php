@@ -25,7 +25,7 @@ beforeEach(function () {
     $package->features()->attach($feature, ['value' => '10']);
 
     $this->user = createUser();
-    $this->sub = Tashil::subscription()->subscribe($this->user, $package);
+    $this->sub = subscribeActive($this->user, $package);
 });
 
 it('fires UsageLimitWarning exactly once when usage first crosses 80%, not on every subsequent increment', function () {

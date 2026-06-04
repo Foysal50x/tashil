@@ -1,5 +1,6 @@
 <?php
 
+use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Events\SubscriptionCancelled;
 use Foysal50x\Tashil\Events\SubscriptionCreated;
@@ -8,6 +9,7 @@ use Foysal50x\Tashil\Events\SubscriptionResumed;
 use Foysal50x\Tashil\Events\SubscriptionSwitched;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\FeatureUsage;
+use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Foysal50x\Tashil\Models\SubscriptionEvent;
@@ -44,18 +46,28 @@ beforeEach(function () {
     $this->user = createUser();
 });
 
-it('subscribes a user to a package and appends a created event', function () {
-    Event::fake();
+it('subscribes a priced plan as pending, issues an initial invoice, and appends a created event', function () {
+    // Scope the fake to the asserted event so the InvoiceObserver (a model
+    // event listener) still runs and stamps the invoice number.
+    Event::fake([SubscriptionCreated::class]);
 
     $subscription = app('tashil')->subscription()->subscribe($this->user, $this->package);
 
     expect($subscription)->toBeInstanceOf(Subscription::class);
-    expect($subscription->status)->toBe(SubscriptionStatus::Active);
+    // Priced plan under activate-on-payment → pending, no access, no period
+    // until the initial invoice is paid.
+    expect($subscription->status)->toBe(SubscriptionStatus::Pending);
+    expect($subscription->isValid())->toBeFalse();
     expect($subscription->package_id)->toBe($this->package->id);
     expect($subscription->subscriber_id)->toBe($this->user->id);
     expect($subscription->auto_renew)->toBeTrue();
-    expect($subscription->current_period_start)->not->toBeNull();
-    expect($subscription->current_period_end)->not->toBeNull();
+    expect($subscription->current_period_start)->toBeNull();
+    expect($subscription->current_period_end)->toBeNull();
+
+    $invoice = Invoice::where('subscription_id', $subscription->id)->first();
+    expect($invoice)->not->toBeNull();
+    expect($invoice->kind)->toBe(InvoiceKind::Initial);
+    expect((float) $invoice->amount)->toBe((float) $this->package->price);
 
     Event::assertDispatched(SubscriptionCreated::class);
 
@@ -111,7 +123,7 @@ it('cancels a subscription immediately', function () {
 });
 
 it('grace-cancels and keeps the user subscribed until ends_at', function () {
-    $subscription = app('tashil')->subscription()->subscribe($this->user, $this->package);
+    $subscription = subscribeActive($this->user, $this->package);
     $originalEndsAt = $subscription->ends_at->copy();
 
     $cancelled = app('tashil')->subscription()->cancel($subscription);
@@ -186,7 +198,9 @@ it('handles lifetime subscription (no expiry)', function () {
         'billing_interval' => 1,
     ]);
 
-    $subscription = app('tashil')->subscription()->subscribe($this->user, $lifetimePackage);
+    // Lifetime is priced, so it still gates on the initial payment; once paid
+    // it activates with no period/expiry.
+    $subscription = subscribeActive($this->user, $lifetimePackage);
 
     expect($subscription->ends_at)->toBeNull();
     expect($subscription->current_period_end)->toBeNull();

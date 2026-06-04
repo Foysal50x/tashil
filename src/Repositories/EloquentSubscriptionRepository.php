@@ -10,6 +10,7 @@ use Foysal50x\Tashil\Enums\ResetPeriod;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
+use Foysal50x\Tashil\Models\SubscriptionFeature;
 use Foysal50x\Tashil\Support\Query\DateFmt;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Config;
@@ -25,7 +26,6 @@ use Tpetry\QueryExpressions\Operator\Arithmetic\Divide;
 use Tpetry\QueryExpressions\Operator\Arithmetic\Multiply;
 use Tpetry\QueryExpressions\Operator\Comparison\Equal;
 use Tpetry\QueryExpressions\Operator\Comparison\NotIsNull;
-use Tpetry\QueryExpressions\Operator\Logical\CondAnd;
 use Tpetry\QueryExpressions\Operator\Logical\CondOr;
 use Tpetry\QueryExpressions\Value\Value;
 
@@ -73,6 +73,23 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
         return $query->exists();
     }
 
+    public function hasLiveSubscription(Subscribable $subscriber): bool
+    {
+        return Subscription::query()
+            ->where('subscriber_type', $subscriber->getSubscriberType())
+            ->where('subscriber_id', $subscriber->getSubscriberKey())
+            ->whereIn('status', [
+                SubscriptionStatus::Active,
+                SubscriptionStatus::OnTrial,
+                SubscriptionStatus::Pending,
+                SubscriptionStatus::PastDue,
+                SubscriptionStatus::PendingCancellation,
+                SubscriptionStatus::Paused,
+                SubscriptionStatus::Suspended,
+            ])
+            ->exists();
+    }
+
     public function findCancelledResumable(Subscribable $subscriber): ?Subscription
     {
         return $subscriber->subscriptions()
@@ -87,8 +104,12 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
 
     public function dueForRenewal(\DateTimeInterface $moment): Collection
     {
+        // Active only — never OnTrial. Trials are billed at conversion
+        // (convertTrial issues the first invoice), so the renewal cron must
+        // not bill a subscription whose trial period merely outlived the
+        // first billing window.
         return Subscription::query()
-            ->whereIn('status', [SubscriptionStatus::Active, SubscriptionStatus::OnTrial])
+            ->where('status', SubscriptionStatus::Active)
             ->where('auto_renew', true)
             ->whereNotNull('current_period_end')
             ->where('current_period_end', '<=', $moment)
@@ -184,6 +205,70 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 'period_start' => $now,
                 'period_end'   => $periodEnd,
             ]);
+        }
+    }
+
+    public function resyncFeatures(Subscription $subscription, Package $package, bool $carryUsage = true): void
+    {
+        $now = now();
+
+        // Supersede the currently-active snapshot rows. Immutable model:
+        // only superseded_at (and updated_at) may change.
+        $subscription->currentFeatures()->get()->each(function (SubscriptionFeature $snapshot) use ($now) {
+            $snapshot->update(['superseded_at' => $now]);
+        });
+
+        $existingUsages = $subscription->featureUsages()->get()->keyBy('feature_id');
+
+        foreach ($package->features as $feature) {
+            if (! ($feature->pivot->is_available ?? true)) {
+                continue;
+            }
+
+            $value = $feature->pivot->value;
+            $reset = $feature->reset_period ?? ResetPeriod::Never;
+
+            $subscription->subscriptionFeatures()->create([
+                'feature_id'    => $feature->id,
+                'feature_slug'  => $feature->slug,
+                'feature_type'  => $feature->type,
+                'value'         => $value,
+                'reset_period'  => $reset,
+                'added_at'      => $now,
+                'superseded_at' => null,
+            ]);
+
+            $limitValue = ($feature->type === FeatureType::Limit && is_numeric($value))
+                ? (float) $value
+                : null;
+
+            $existing = $existingUsages->get($feature->id);
+
+            if ($existing && $carryUsage) {
+                // Keep the usage value; update the cap + reset cadence to the
+                // new plan. Period window is preserved.
+                $existing->update([
+                    'limit_value'  => $limitValue,
+                    'reset_period' => $reset,
+                ]);
+            } else {
+                // New counter (or a reset when not carrying usage forward).
+                $periodEnd = EloquentFeatureUsageRepository::nextPeriodEnd($reset, $now, $now);
+                $payload = [
+                    'feature_id'   => $feature->id,
+                    'usage'        => 0,
+                    'limit_value'  => $limitValue,
+                    'reset_period' => $reset,
+                    'period_start' => $now,
+                    'period_end'   => $periodEnd,
+                ];
+
+                if ($existing) {
+                    $existing->update($payload);
+                } else {
+                    $subscription->featureUsages()->create($payload);
+                }
+            }
         }
     }
 
@@ -329,9 +414,11 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
             return 0.0;
         }
 
+        // Conversion is measured by the durable trial_converted_at stamp, not
+        // current status — a trial that converted and later cancelled/expired
+        // still counts as converted.
         $converted = Subscription::query()
-            ->whereNotNull('trial_ends_at')
-            ->where('status', SubscriptionStatus::Active)
+            ->whereNotNull('trial_converted_at')
             ->count();
 
         return round(($converted / $totalTrials) * 100, 2);
@@ -456,10 +543,7 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 new Alias(new CountFilter(new Equal("{$subscriptionsTable}.status", $expired)), 'expired'),
                 new Alias(new CountFilter(new NotIsNull("{$subscriptionsTable}.trial_ends_at")), 'total_trials'),
                 new Alias(
-                    new CountFilter(new CondAnd(
-                        new NotIsNull("{$subscriptionsTable}.trial_ends_at"),
-                        new Equal("{$subscriptionsTable}.status", $active),
-                    )),
+                    new CountFilter(new NotIsNull("{$subscriptionsTable}.trial_converted_at")),
                     'converted_trials',
                 ),
                 new Alias(new Coalesce([new SumFilter($mrrCase, $activeFilter), new Value(0)]), 'mrr'),
@@ -536,10 +620,7 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 new Alias(new CountFilter($cancelledFilter), 'cancelled_count'),
                 new Alias(new CountFilter(new NotIsNull("{$subscriptionsTable}.trial_ends_at")), 'total_trials'),
                 new Alias(
-                    new CountFilter(new CondAnd(
-                        new NotIsNull("{$subscriptionsTable}.trial_ends_at"),
-                        new Equal("{$subscriptionsTable}.status", $active),
-                    )),
+                    new CountFilter(new NotIsNull("{$subscriptionsTable}.trial_converted_at")),
                     'converted_trials',
                 ),
                 new Alias(new Coalesce([new SumFilter($mrrCase, $activeFilter), new Value(0)]), 'mrr'),
