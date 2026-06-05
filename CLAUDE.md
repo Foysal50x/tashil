@@ -310,5 +310,8 @@ Route::middleware('feature:api-calls')->group(fn () => /* ... */);
 Tashil::resolveSubscribableUsing(fn () => Team::current());
 
 Tashil::events()->append($sub, 'host.custom', payload: [...], idempotencyKey: 'op-42');
+Tashil::events()->historyFor($sub, perPage: 20);                 // newest-first LengthAwarePaginator<SubscriptionEvent>
+Tashil::events()->historyForSubscriber($user, perPage: 20);      // every sub the subscriber held
+Tashil::events()->historyForPackage($plan, perPage: 20, with: ['subscription.subscriber']); // plan-wide timeline
 Tashil::analytics()->dashboardSummary();
 ```

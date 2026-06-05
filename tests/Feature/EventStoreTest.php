@@ -4,6 +4,7 @@ use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\SubscriptionEvent;
 use Foysal50x\Tashil\Services\EventStore;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 beforeEach(function () {
     $this->loadMigrationsFrom(__DIR__ . '/../Fixtures/create_users_table.php');
@@ -87,4 +88,52 @@ it('replays history for a subscription in sequence order', function () {
     $types = $this->subscription->events()->get()->pluck('event_type')->all();
 
     expect($types)->toBe(['subscription.created', 'a', 'b', 'c']);
+});
+
+it('paginates a single subscription history newest-first and eager-loads', function () {
+    /** @var EventStore $store */
+    $store = app(EventStore::class);
+
+    $store->append($this->subscription, 'a', occurredAt: now()->addMinute());
+    $store->append($this->subscription, 'b', occurredAt: now()->addMinutes(2));
+
+    $page = $store->historyFor($this->subscription, perPage: 2, with: ['subscription']);
+
+    expect($page)->toBeInstanceOf(LengthAwarePaginator::class)
+        ->and($page->total())->toBe(3)              // subscription.created + a + b
+        ->and($page->perPage())->toBe(2)
+        ->and($page->items()[0]->event_type)->toBe('b')             // newest occurred_at first
+        ->and($page->items()[0]->relationLoaded('subscription'))->toBeTrue();
+});
+
+it('paginates combined history across every subscription on a package', function () {
+    /** @var EventStore $store */
+    $store = app(EventStore::class);
+
+    // A second subscriber on the same plan.
+    $sub2 = app('tashil')->subscription()->subscribe(createUser(), $this->package);
+
+    $store->append($this->subscription, 'alpha');
+    $store->append($sub2, 'beta');
+
+    $page = $store->historyForPackage($this->package, perPage: 50);
+    $types = collect($page->items())->pluck('event_type');
+
+    expect($page)->toBeInstanceOf(LengthAwarePaginator::class)
+        ->and($types)->toContain('alpha')->toContain('beta')
+        ->and($types->filter(fn ($t) => $t === 'subscription.created')->count())->toBe(2);
+});
+
+it('paginates history scoped to a single subscriber', function () {
+    /** @var EventStore $store */
+    $store = app(EventStore::class);
+
+    $sub2 = app('tashil')->subscription()->subscribe(createUser(), $this->package);
+    $store->append($sub2, 'theirs');
+    $store->append($this->subscription, 'mine');
+
+    $types = collect($store->historyForSubscriber($this->user, perPage: 50)->items())->pluck('event_type');
+
+    expect($types)->toContain('mine')->toContain('subscription.created')
+        ->and($types)->not->toContain('theirs');
 });

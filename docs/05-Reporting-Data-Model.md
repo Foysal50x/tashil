@@ -92,6 +92,20 @@ app(\Foysal50x\Tashil\Contracts\SubscriptionEventRepositoryInterface::class)
     ->listForSubscription($sub, 'subscription.switched', 100);
 ```
 
+**Cross-cutting history readers (`Tashil::events()`).** For UI timelines that span many subscriptions — a subscriber's full history, or every subscription on a plan — the `EventStore` exposes paginated readers. They return a newest-first `LengthAwarePaginator<SubscriptionEvent>` (occurred_at desc, sequence_num desc as tie-breaker); the host controls page size, page name, and eager-loaded relations via arguments. The log stays append-only — these are reads:
+
+```php
+Tashil::events()->historyFor($subscription, perPage: 20);                     // one subscription
+Tashil::events()->historyForSubscriber($tenant, perPage: 20);                 // every sub the subscriber held
+Tashil::events()->historyForPackage($plan,                                    // plan-wide lifecycle timeline
+    perPage: 20,
+    with: ['subscription.subscriber'],
+    pageName: 'events',
+);
+```
+
+The service only maps the domain object to its identifiers and delegates to `SubscriptionEventRepositoryInterface::paginateForSubscription / paginateForSubscriber / paginateForPackage` — all query building (including the subscription subquery) lives in the repository, and the paginator (data), never a query builder, crosses the service boundary. The per-subscription `$sub->events()` relation remains the sequence-ordered reader for replay.
+
 ### The feature snapshot (`tashil_subscription_features`)
 
 One row per (subscription, feature, lifetime-segment). `superseded_at` marks the moment a snapshot row was replaced — current rows have `null`, historical rows have the supersession timestamp.

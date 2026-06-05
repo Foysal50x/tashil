@@ -2,11 +2,14 @@
 
 namespace Foysal50x\Tashil\Services;
 
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Contracts\SubscriptionEventRepositoryInterface;
 use Foysal50x\Tashil\Managers\DatabaseManager;
+use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Foysal50x\Tashil\Models\SubscriptionEvent;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 
 /**
@@ -37,6 +40,48 @@ class EventStore
         protected DatabaseManager $db,
         protected SubscriptionEventRepositoryInterface $events,
     ) {}
+
+    /**
+     * Paginate the immutable history for a single subscription, newest first.
+     * The log stays append-only — this is a read.
+     *
+     * @param  list<string>  $with  relations to eager-load (e.g. 'subscription')
+     * @return LengthAwarePaginator<SubscriptionEvent>
+     */
+    public function historyFor(Subscription $subscription, int $perPage = 20, array $with = [], string $pageName = 'page'): LengthAwarePaginator
+    {
+        return $this->events->paginateForSubscription($subscription->id, $perPage, $with, $pageName);
+    }
+
+    /**
+     * Paginate the combined history across every subscription the subscriber
+     * has ever held (current and terminated), newest first.
+     *
+     * @param  list<string>  $with  relations to eager-load
+     * @return LengthAwarePaginator<SubscriptionEvent>
+     */
+    public function historyForSubscriber(Subscribable $subscriber, int $perPage = 20, array $with = [], string $pageName = 'page'): LengthAwarePaginator
+    {
+        return $this->events->paginateForSubscriber(
+            $subscriber->getSubscriberType(),
+            $subscriber->getSubscriberKey(),
+            $perPage,
+            $with,
+            $pageName,
+        );
+    }
+
+    /**
+     * Paginate the combined history across every subscription on a plan,
+     * newest first — the plan-wide lifecycle timeline.
+     *
+     * @param  list<string>  $with  relations to eager-load (e.g. 'subscription.subscriber')
+     * @return LengthAwarePaginator<SubscriptionEvent>
+     */
+    public function historyForPackage(Package $package, int $perPage = 20, array $with = [], string $pageName = 'page'): LengthAwarePaginator
+    {
+        return $this->events->paginateForPackage($package->id, $perPage, $with, $pageName);
+    }
 
     public function append(
         Subscription $subscription,

@@ -258,6 +258,22 @@ $store->append($subscription, 'host.custom.thing', [
 
 Use the idempotency key when the operation can be retried by an outer system (queued job, HTTP retry).
 
+Reading the log back is part of the same public surface. The per-subscription relation is the sequence-ordered reader for replay; the `EventStore` adds paginated, newest-first readers for UI timelines that span many subscriptions:
+
+```php
+$subscription->events()->get();   // sequence-ordered — replay / audit
+
+Tashil::events()->historyFor($subscription, perPage: 20);          // one subscription
+Tashil::events()->historyForSubscriber($tenant, perPage: 20);      // every sub the subscriber held
+Tashil::events()->historyForPackage($plan,                         // plan-wide lifecycle timeline
+    perPage: 20,
+    with: ['subscription.subscriber'],
+    pageName: 'events',
+);
+```
+
+Each returns a `LengthAwarePaginator<SubscriptionEvent>` (occurred_at desc, sequence_num desc tie-break). All query building lives in `SubscriptionEventRepositoryInterface` (`paginateForSubscription / paginateForSubscriber / paginateForPackage`) — the service only maps the domain object to identifiers and returns the paginator, never a query builder. See [05-Reporting-Data-Model.md](05-Reporting-Data-Model.md).
+
 ## Integrating tahsil with the host's billing / payments
 
 The contract: tahsil owns subscription state, invoice issuance, and the activation/renewal/dunning state machine; the host owns money movement. The **full lifecycle** (activation, renewal, dunning, reactivation, proration, pause) is documented in [09-Billing-Lifecycle.md](09-Billing-Lifecycle.md); the renewal slice:
