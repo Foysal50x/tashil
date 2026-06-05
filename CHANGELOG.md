@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0-beta] - 2026-06-06
+
+Adds a host-reported **transaction ledger** (record payments / failures /
+refunds), an invoice/transaction **read API** on `BillingService`, and a fix
+that scopes generated transaction-id uniqueness to the gateway. Tashil still
+never moves money — it records what the host's gateway reports.
+
 ### Added
 
 - **Transaction ledger API** — `BillingService::recordPayment()`,
