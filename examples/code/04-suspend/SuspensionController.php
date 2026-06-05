@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Models\Subscription;
 use Illuminate\Http\JsonResponse;
@@ -86,12 +85,7 @@ class SuspensionController extends Controller
      */
     public function status(Subscription $subscription): JsonResponse
     {
-        $overdue = $subscription->invoices()
-            ->where('status', InvoiceStatus::Pending)
-            ->whereNotNull('due_date')
-            ->where('due_date', '<', now())
-            ->latest('due_date')
-            ->first();
+        $overdue = Tashil::billing()->overdueInvoice($subscription);
 
         return response()->json([
             'status'           => $subscription->status->value,

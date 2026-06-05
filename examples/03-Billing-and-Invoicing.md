@@ -1,6 +1,6 @@
 # Billing and Invoicing
 
-Tahsil owns invoice **state**, never money movement. It issues invoices and reacts to them being paid; the host's gateway performs the actual charge and calls `markAsPaid()`.
+Tahsil owns invoice **state** and the **transaction ledger**, never money movement. It issues invoices, records the payments/refunds your gateway reports, and reacts to invoices being paid; the host's gateway performs the actual charge and refund.
 
 ## 1. Invoice Generation
 
@@ -93,7 +93,18 @@ Full runnable version: [code/00-setup/UniqueInvoiceNumberGenerator.php](./code/0
 Invoices typically follow this flow:
 `Pending` -> `Paid` or `Overdue` -> `Cancelled` / `Void`
 
-**Record a payment with `markAsPaid()`** — don't hand-write the status. It stamps `paid_at` and, crucially, lets `InvoiceObserver` route the subscription side effect based on the invoice `kind` and the subscription's current status:
+**Record a payment with `recordPayment()`** — don't hand-write the status, and don't hand-roll the `Transaction` + `markAsPaid()` dance. `recordPayment()` writes the transaction audit row **and** marks the invoice paid in one DB transaction, which lets `InvoiceObserver` route the subscription side effect based on the invoice `kind` and the subscription's current status:
+
+```php
+// Records the Transaction + settles the invoice (idempotent on gateway+id).
+app('tashil')->billing()->recordPayment(
+    $invoice,
+    gateway: 'stripe',
+    transactionId: $charge->id,   // null for cash/manual → a TXN-… id is stamped
+);
+```
+
+`markAsPaid()` is still available as the low-level trigger if you record the transaction yourself, but `recordPayment()` is the complete path (see §4):
 
 ```php
 $invoice->markAsPaid();
@@ -111,3 +122,54 @@ $invoice->markAsPaid();
 ```php
 $invoice->markAsVoid(); // status: Void
 ```
+
+## 4. Transactions — the money ledger
+
+An invoice is the *bill*; a **transaction** is the record of a payment attempt against it (`tashil_transactions`, `Invoice::transactions()`). Tahsil never charges a card — your gateway does — but it gives you three methods on `billing()` to record what your gateway reports, each writing the audit row and reflecting the invoice state so the two never drift apart:
+
+| Method | Records | Invoice effect |
+|---|---|---|
+| `recordPayment($invoice, …)` | a `success` transaction | `markAsPaid()` → activate / advance / reactivate |
+| `recordFailedPayment($invoice, …)` | a `failed` transaction | none — left `Pending` for dunning |
+| `recordRefund($transaction, …)` | refund on the original transaction | `Refunded` on a **full** refund only |
+
+```php
+$billing = app('tashil')->billing();
+
+// A successful charge — settles + auto-activates/renews/reactivates.
+$txn = $billing->recordPayment(
+    $invoice,
+    amount: 30.00,                       // defaults to the invoice amount
+    gateway: 'stripe',
+    transactionId: 'ch_3P…',             // gateway id; null → stamps a TXN-… id
+    gatewayResponse: $payload,           // stored as JSON for reconciliation
+    metadata: ['source' => 'webhook'],
+);
+
+// A declined charge — audit only; the invoice stays Pending for dunning.
+$billing->recordFailedPayment($invoice, gateway: 'stripe', gatewayResponse: ['decline_code' => 'insufficient_funds']);
+```
+
+**Idempotency is built in.** `recordPayment()` / `recordFailedPayment()` dedupe on the `UNIQUE(gateway, transaction_id)` key — a re-delivered, at-least-once webhook resolves to the row already written and never settles the invoice twice. Pass the gateway id verbatim; leave it null only for cash/manual entries (then `TransactionObserver` stamps a `TXN-…` id, with uniqueness checked within that gateway — the same id can exist under another gateway).
+
+Events: `PaymentRecorded`, `PaymentFailed` (and `PaymentRefunded`, below) carry the transaction + invoice and fire after commit. `recordPayment()` also fires the existing `InvoicePaid` via the observer.
+
+## 5. Refunds
+
+The host refunds at the gateway, then records it. Tahsil never issues a gateway refund:
+
+```php
+// 1. Your gateway moves the money.
+$gateway->refund($txn->transaction_id, 12.50);
+
+// 2. Tahsil records it against the original transaction.
+$billing->recordRefund(
+    $txn,
+    amount: 12.50,                       // omit for a full refund of the remaining balance
+    reason: 'customer request',
+);
+```
+
+`recordRefund()` accumulates `refunded_amount` (so partial refunds add up), stamps `refunded_at` + `refund_reason`, and fires `PaymentRefunded`. A **partial** refund keeps the transaction `Success` and the invoice `Paid`; once the cumulative refund reaches the full charge the transaction flips to `Refunded` and the invoice moves to `Refunded`. Refunding more than the refundable balance, or refunding a non-successful transaction, throws `InvalidArgumentException`.
+
+Full runnable controllers: [code/02-paid-invoice/PaymentWebhookController.php](./code/02-paid-invoice/PaymentWebhookController.php) and [code/02-paid-invoice/RefundController.php](./code/02-paid-invoice/RefundController.php).

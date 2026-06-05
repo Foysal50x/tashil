@@ -4,7 +4,7 @@ AI working guide for `foysal50x/tashil`. Read before touching code.
 
 ## What this package is
 
-Laravel subscription + feature management. **Owns** plan catalog, subscription state, feature gating, atomic usage counters, trial lifecycle, scheduled state transitions, invoice issuance, the **activate-on-payment → renewal → dunning → reactivation** state machine, **proration on in-place plan changes**, immutable event log, and route middleware for gating. **Does NOT own** payment capture, the actual retry *charge* during dunning, refund execution, gateway sync, or the wallet/balance that funds Metered features — host app handles money movement and binds `MeteredBilling` for metered billing. Read [docs/09-Billing-Lifecycle.md](docs/09-Billing-Lifecycle.md) before touching activation / renewal / dunning / proration code.
+Laravel subscription + feature management. **Owns** plan catalog, subscription state, feature gating, atomic usage counters, trial lifecycle, scheduled state transitions, invoice issuance, the **transaction ledger** (recording the payments/refunds the host executes), the **activate-on-payment → renewal → dunning → reactivation** state machine, **proration on in-place plan changes**, immutable event log, and route middleware for gating. **Does NOT own** payment capture, the actual retry *charge* during dunning, refund execution, gateway sync, or the wallet/balance that funds Metered features — host app handles money movement, reports the result via `Tashil::billing()->record*()`, and binds `MeteredBilling` for metered billing. Read [docs/09-Billing-Lifecycle.md](docs/09-Billing-Lifecycle.md) before touching activation / renewal / dunning / proration code.
 
 **Billing model:** a priced plan (`price > 0`, `requires_payment = true`) subscribes as `Pending` with NO access; an `initial` invoice is issued, and `activate()` runs when it's paid (anchoring the period to `paid_at`). Free / `requires_payment = false` plans subscribe `Active` immediately. Trials subscribe `OnTrial` (access granted) and bill at `convertTrial()`. Gating is decided by the **package's own `requires_payment` flag** — `tashil.billing.activate_on_payment` (default `true`) only seeds that flag at creation when the caller doesn't set it; flipping the config later affects only new packages. Create packages with `requires_payment = false` for the legacy "access first, bill on renewal" model.
 
@@ -178,6 +178,7 @@ Adding a feature ⇒ add a Feature test. Fixing a bug ⇒ add a regression test 
 |---|---|
 | New subscription state transition | `SubscriptionService` method + `EventStore::append` + event class + state machine doc |
 | Activation / renewal / dunning / proration | `SubscriptionService` (`activate`/`reactivate`/`markPastDue`/`suspend`/`changePlan`), `InvoiceObserver` routing, `ProcessDunningCommand` + [docs/09-Billing-Lifecycle.md](docs/09-Billing-Lifecycle.md) |
+| Recording payments / refunds / failures | `BillingService` (`recordPayment`/`recordFailedPayment`/`recordRefund`), `Payment*` event, `TransactionRepositoryInterface`, `Invoice::markAs*` + [docs/09-Billing-Lifecycle.md](docs/09-Billing-Lifecycle.md) (Transaction ledger). Keep it record-only — no gateway calls |
 | New feature type | `FeatureType` enum + `FeatureBuilder::xxx()` helper + `Feature::isXxx()` + `UsageService::check`/`increment` + `EloquentSubscriptionRepository::syncFeatures` (limit_value rules) + doc 02 |
 | New scheduled job | `src/Console/` command + wire in `TashilServiceProvider::registerSchedule()` + doc 04 |
 | Custom invoice / transaction id | Implement `generate(): string` (extend `TokenizedIdGenerator` for token format reuse) + bind in `config/tashil.php` `invoice.generator` / `transaction.generator` |
@@ -189,16 +190,29 @@ Adding a feature ⇒ add a Feature test. Fixing a bug ⇒ add a regression test 
 
 ```
 Tashil issues Invoice (status=pending) → fires InvoiceIssued
-Host listener charges via gateway → on success calls $invoice->markAsPaid()
+Host listener charges via gateway → on success calls
+  Tashil::billing()->recordPayment($invoice, gateway, transactionId)
+    → writes Transaction(status=success) + $invoice->markAsPaid()  (one DB tx)
 Tashil InvoiceObserver (status → Paid):
-  → SubscriptionService::advancePeriod($sub)
+  → SubscriptionService::advancePeriod($sub)   (or activate / reactivate, by kind+status)
   → EventStore::append('subscription.renewed')
   → dispatch SubscriptionRenewed + InvoicePaid
+→ BillingService dispatches PaymentRecorded (after commit)
 ```
 
-For dunning / webhook reconciliation / refunds, host wires equivalent listeners. Tashil ends at issuing the bill and reflecting the host's `markAsPaid` decision.
+For dunning / webhook reconciliation / refunds, host wires equivalent listeners. Tashil ends at issuing the bill and recording the host's reported result (payment / failure / refund); it never charges or refunds at the gateway.
 
-Transactions: pass gateway-supplied id through (`ch_…`, `txn_…`). `UNIQUE(gateway, transaction_id)` on `tashil_transactions` makes duplicate webhook deliveries safe — catch `UniqueConstraintViolationException` as "already recorded". For cash / manual entries, leave `transaction_id` empty — `TransactionObserver::creating` stamps `TXN-…` from `tashil.transaction.generator`.
+Transaction ledger: record money events through `Tashil::billing()` — don't hand-roll `Transaction::create()` + `markAsPaid()`:
+
+- `recordPayment($invoice, …)` → `success` txn + `markAsPaid()` (routes activate/advance/reactivate) + `PaymentRecorded`.
+- `recordFailedPayment($invoice, …)` → `failed` txn, invoice stays `Pending` for dunning + `PaymentFailed`.
+- `recordRefund($transaction, …)` → accumulates `refunded_amount`; full refund flips txn→`Refunded` + invoice→`Refunded` + `PaymentRefunded`. Records a host-executed gateway refund; never executes one.
+
+`recordPayment` / `recordFailedPayment` are idempotent on `UNIQUE(gateway, transaction_id)` — a replayed at-least-once webhook resolves to the existing row (no double-settle), so the host no longer hand-catches `UniqueConstraintViolationException`. Pass the gateway id (`ch_…`, `txn_…`) verbatim; leave it null for cash/manual entries and `TransactionObserver::creating` stamps `TXN-…` from `tashil.transaction.generator` (uniqueness checked within the row's gateway — `TransactionIdGenerator` takes the gateway via its constructor and checks the composite `(gateway, transaction_id)`, so the same id under a different gateway is allowed). The ledger sits behind `TransactionRepositoryInterface` (Eloquent default, append-only, uncached). `Invoice::markAsPaid/markAsVoid/markAsRefunded` remain as low-level transitions for hosts that record the transaction themselves.
+
+Invoice/transaction reads also go through `Tashil::billing()` — don't query the `Invoice` model directly in host code:
+- `latestInvoice($sub, ?InvoiceKind)`, `pendingInvoice($sub)` (outstanding), `overdueInvoice($sub)` (pending + past due), `successfulTransaction($invoice)` (the charge a refund targets).
+- These resolve through `InvoiceRepositoryInterface` / `TransactionRepositoryInterface` and are intentionally **not** cached (per-subscription invoices change on every payment/dunning step). New per-subscription invoice read ⇒ add to the interface + Eloquent + Cache decorator (pass-through), then expose on `BillingService`.
 
 ### Metered billing contract
 
@@ -255,9 +269,9 @@ Host overrides via `Tashil::resolveSubscribableUsing(fn () => Team::current())` 
 
 ## Out of scope — don't add
 
-- Card capture, payouts, refund execution, gateway sync.
+- Card capture, payouts, refund **execution**, gateway sync. (Tahsil *records* payments/refunds the host already executed — `recordPayment` / `recordRefund` — but never calls a gateway. Keep `record*` a pure ledger + invoice-state reflection; don't add a gateway client, charge, or refund call here.)
 - The actual retry *charge* during dunning, and webhook reconciliation logic. (Tahsil owns the dunning *state machine + schedule* — `tashil:process-dunning` — and fires the events; the host performs the charge. Don't add charging here.)
-- Hash-chained financial ledger.
+- Hash-chained financial ledger. (The `tashil_transactions` ledger is a plain audit table, not a tamper-evident chain.)
 - Coupon / discount engine.
 - Wallet / balance / account ledger — Metered features delegate to host via `MeteredBilling`. Don't introduce balance tables here.
 - MRR waterfall (new/expansion/contraction/churn) beyond `AnalyticsService`.
@@ -287,7 +301,11 @@ Tashil::package('pro')->name('Pro')->price(29)->monthly()->trialDays(14)
 // Priced plan → Pending until the initial invoice is paid (then auto-activates).
 $sub = Tashil::subscription()->subscribe($user, $package);
 Tashil::subscription()->subscribe($user, $package, withTrial: true); // OnTrial, access now
-// Host charges → $invoice->markAsPaid() → InvoiceObserver → activate()
+// Host charges → Tashil::billing()->recordPayment($invoice, gateway, txnId) → InvoiceObserver → activate()
+
+Tashil::billing()->recordPayment($invoice, gateway: 'stripe', transactionId: 'ch_…'); // success txn + settle (idempotent)
+Tashil::billing()->recordFailedPayment($invoice, gateway: 'stripe');                   // failed txn; stays pending for dunning
+Tashil::billing()->recordRefund($transaction, amount: 12.50, reason: '…');             // host-executed refund; full → invoice Refunded
 
 Tashil::subscription()->convertTrial($sub);                      // anchors + first invoice
 Tashil::subscription()->changePlan($sub, $newPackage);           // in-place: upgrade prorates, downgrade defers

@@ -174,9 +174,9 @@ Format-token entropy matters at bulk-insert time. The defaults give ~1M (`NNNNNN
 
 Rather than relying on entropy + the DB constraint to *catch* a collision, a generator can *verify* uniqueness up front by implementing `Foysal50x\Tashil\Contracts\ShouldBeUnique`. `TokenizedIdGenerator::generate()` then re-renders the id until `isUnique()` accepts it (or the attempt budget is exhausted).
 
-**Both built-in generators already implement this** — `InvoiceNumberGenerator` checks `invoice_number` and `TransactionIdGenerator` checks `transaction_id` against the live table before the observer stamps the row. The pre-check only narrows the collision window; the DB unique constraint stays the real guarantee under concurrency, and the host owns retry on an actual `UniqueConstraintViolationException`. A generator that omits the contract returns the rendered id immediately — no extra query.
+**Both built-in generators already implement this** — `InvoiceNumberGenerator` checks `invoice_number` (globally unique) and `TransactionIdGenerator` checks the composite `(gateway, transaction_id)` against the live table before the observer stamps the row. The transaction generator takes the row's gateway via its constructor (`TransactionObserver` passes `$transaction->gateway`), so its pre-check is scoped to the same gateway as the DB constraint — the *same* id under a different gateway (e.g. a manual id that happens to match a Stripe charge id) is correctly treated as free. The pre-check only narrows the collision window; the DB unique constraint stays the real guarantee under concurrency, and the host owns retry on an actual `UniqueConstraintViolationException`. A generator that omits the contract returns the rendered id immediately — no extra query.
 
-Override the contract to change the *scope* of the check — e.g. include soft-deleted rows, or scope a transaction id per gateway:
+Override the contract to change the *scope* of the check — e.g. include soft-deleted rows (a custom transaction generator can take a `string $gateway` constructor argument the observer will populate):
 
 ```php
 namespace App\Billing;
@@ -290,7 +290,8 @@ The contract: tahsil owns subscription state, invoice issuance, and the activati
 ├─────────────────────────────────────────────────────────────┤
 │  Host listener                                              │
 │  - Charges card via Stripe/Paddle/…                         │
-│  - On success → $invoice->markAsPaid()                      │
+│  - On success → Tashil::billing()->recordPayment($invoice) │
+│    (writes the Transaction + marks the invoice paid)        │
 ├─────────────────────────────────────────────────────────────┤
 │  Tahsil InvoiceObserver — routes by invoice.kind + status:  │
 │  - initial + Pending          → activate()  (first access)  │
@@ -301,9 +302,46 @@ The contract: tahsil owns subscription state, invoice issuance, and the activati
 └─────────────────────────────────────────────────────────────┘
 ```
 
-For the failed-payment retry *charge* and gateway webhook reconciliation / refund execution, the host wires listeners on `SubscriptionPastDue` / `InvoiceOverdue` / `SubscriptionSuspended`. Tahsil owns the dunning *state machine and schedule* (`tashil:process-dunning`); it issues the bill, escalates the lifecycle, and reflects the host's `markAsPaid` decision — it never charges.
+For the failed-payment retry *charge* and gateway webhook reconciliation / refund execution, the host wires listeners on `SubscriptionPastDue` / `InvoiceOverdue` / `SubscriptionSuspended`. Tahsil owns the dunning *state machine and schedule* (`tashil:process-dunning`); it issues the bill, escalates the lifecycle, and reflects the host's recorded decision — it never charges.
 
-When recording transactions, pass the gateway-supplied id through (Stripe `ch_…`, Paddle `txn_…`, etc.). The `UNIQUE(gateway, transaction_id)` constraint on `tashil_transactions` makes duplicate webhook deliveries safe — a second insert with the same pair throws `UniqueConstraintViolationException`, which the host should treat as "already recorded, ignore." For non-gateway payments (cash, manual bank transfer), leave `transaction_id` empty and `TransactionObserver::creating` will stamp a `TXN-…` id from `tashil.transaction.generator`.
+### Recording payments, failures, and refunds
+
+Once your gateway has moved the money, report the result through `Tashil::billing()` rather than touching `Transaction` / `markAsPaid` by hand. Each method writes the transaction audit row **and** reflects the invoice state in one DB transaction, so a settled invoice always has a matching ledger row:
+
+```php
+$billing = Tashil::billing();
+
+// Successful charge → records a `success` transaction + marks the invoice paid
+// (which routes through InvoiceObserver: activate / advancePeriod / reactivate).
+$billing->recordPayment($invoice, gateway: 'stripe', transactionId: 'ch_…');
+
+// Declined charge → records a `failed` transaction; invoice stays Pending for dunning.
+$billing->recordFailedPayment($invoice, gateway: 'stripe', gatewayResponse: ['decline_code' => '…']);
+
+// Refund the host already executed at the gateway → records it on the original
+// transaction; flips the invoice to Refunded on a FULL refund (partials keep it Paid).
+$billing->recordRefund($transaction, amount: 12.50, reason: 'customer request');
+```
+
+`recordPayment()` / `recordFailedPayment()` are **idempotent** on the `UNIQUE(gateway, transaction_id)` key: a re-delivered, at-least-once webhook resolves to the row already written and never settles the invoice twice — you no longer need to hand-catch `UniqueConstraintViolationException`. Pass the gateway-supplied id through (Stripe `ch_…`, Paddle `txn_…`, etc.). For non-gateway payments (cash, manual bank transfer), leave `transactionId` null and `TransactionObserver::creating` stamps a `TXN-…` id from `tashil.transaction.generator`. These methods fire `PaymentRecorded` / `PaymentFailed` / `PaymentRefunded` (carrying the transaction + invoice) after commit; `recordPayment()` also fires the existing `InvoicePaid` via the observer.
+
+`Invoice::markAsPaid()` / `markAsVoid()` / `markAsRefunded()` remain available as low-level state transitions if you record the transaction yourself, but `recordPayment` / `recordRefund` are the complete, idempotent path.
+
+### Reading invoices and transactions
+
+Don't reach for `Invoice::where('subscription_id', …)` in host code — go through the billing read API so the access path stays behind the repository (and overridable):
+
+```php
+$billing = Tashil::billing();
+
+$billing->latestInvoice($subscription);                       // most recent invoice
+$billing->latestInvoice($subscription, InvoiceKind::Initial); // most recent of a kind
+$billing->pendingInvoice($subscription);                      // outstanding bill to pay (or null)
+$billing->overdueInvoice($subscription);                      // pending + past due — the dunning trigger (or null)
+$billing->successfulTransaction($invoice);                    // the settled charge a refund targets (or null)
+```
+
+These resolve through `InvoiceRepositoryInterface` / `TransactionRepositoryInterface`, so a host that binds a custom repository (or a cache decorator) gets consistent behavior everywhere. They are read paths and are intentionally **not** cached — a per-subscription invoice changes on every payment/dunning step, so callers always see fresh status.
 
 ## Adding the trait to a model
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foysal50x\Tashil\Repositories;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
+use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Invoice;
@@ -35,6 +36,35 @@ class EloquentInvoiceRepository implements InvoiceRepositoryInterface
         return Invoice::whereIn('subscription_id', $subscriptionIds)
             ->latest()
             ->get();
+    }
+
+    public function latestForSubscription(int $subscriptionId, ?InvoiceKind $kind = null): ?Invoice
+    {
+        return Invoice::query()
+            ->where('subscription_id', $subscriptionId)
+            ->when($kind !== null, fn ($q) => $q->where('kind', $kind))
+            ->latest('id')
+            ->first();
+    }
+
+    public function pendingForSubscription(int $subscriptionId): ?Invoice
+    {
+        return Invoice::query()
+            ->where('subscription_id', $subscriptionId)
+            ->where('status', InvoiceStatus::Pending)
+            ->latest('id')
+            ->first();
+    }
+
+    public function overdueForSubscription(int $subscriptionId, \DateTimeInterface $moment): ?Invoice
+    {
+        return Invoice::query()
+            ->where('subscription_id', $subscriptionId)
+            ->where('status', InvoiceStatus::Pending)
+            ->whereNotNull('due_date')
+            ->where('due_date', '<', $moment)
+            ->latest('due_date')
+            ->first();
     }
 
     public function dueForDunning(\DateTimeInterface $moment): Collection

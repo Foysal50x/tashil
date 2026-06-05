@@ -65,12 +65,14 @@ Subscribing twice for the same subscriber throws `Foysal50x\Tashil\Exceptions\Su
 A `Pending` subscription has no access and no period yet. It becomes `Active` when its `initial` invoice is paid — Tashil never moves money, so the host charges the card and records the payment:
 
 ```php
-use Foysal50x\Tashil\Models\Invoice;
+use Foysal50x\Tashil\Facades\Tashil;
 
-$invoice = Invoice::where('subscription_id', $subscription->id)->latest('id')->first();
+// the outstanding invoice for this subscription, via the billing API:
+$invoice = Tashil::billing()->pendingInvoice($subscription);
 
-// after the host's gateway confirms the charge:
-$invoice->markAsPaid();   // InvoiceObserver → SubscriptionService::activate()
+// after the host's gateway confirms the charge — records the transaction AND
+// settles the invoice in one idempotent call:
+Tashil::billing()->recordPayment($invoice, gateway: 'stripe', transactionId: 'ch_…');
 
 $subscription->refresh(); // status: Active; period anchored to invoice.paid_at
 ```

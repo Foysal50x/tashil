@@ -17,7 +17,11 @@ class TransactionObserver
         }
 
         $generatorClass = Config::get('tashil.transaction.generator', TransactionIdGenerator::class);
-        $generator = app($generatorClass);
+
+        // Pass the row's gateway so the generator checks uniqueness within the
+        // composite (gateway, transaction_id) scope. Falls back to the column
+        // default when the caller didn't set one.
+        $generator = app($generatorClass, ['gateway' => $transaction->gateway ?? 'manual']);
 
         $transaction->transaction_id = $generator->generate();
     }
