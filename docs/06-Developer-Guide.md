@@ -170,9 +170,13 @@ class StripeStyleGenerator
 
 Format-token entropy matters at bulk-insert time. The defaults give ~1M (`NNNNNN`) and ~1.3B (`NNNNNNAA`) combinations per `YYMMDD` bucket; the transaction default is wider because gateways can drop several hundred webhooks per minute. Widen the format if you expect more than ~√combos rows on a single day or you will hit birthday collisions. The composite `UNIQUE(gateway, transaction_id)` is the last line of defence; a colliding generator output will surface as a `UniqueConstraintViolationException` rather than silent corruption.
 
-#### Guaranteed-unique ids (opt-in)
+#### Guaranteed-unique ids
 
-Rather than relying on entropy + the DB constraint to *catch* a collision, a generator can *verify* uniqueness up front by implementing `Foysal50x\Tashil\Contracts\ShouldBeUnique`. `TokenizedIdGenerator::generate()` then re-renders the id until `isUnique()` accepts it (or the attempt budget is exhausted). Generators that don't implement the contract return the rendered id immediately — no extra query, no behavior change. The two built-in generators are **not** unique-aware by default; opt in when you need it:
+Rather than relying on entropy + the DB constraint to *catch* a collision, a generator can *verify* uniqueness up front by implementing `Foysal50x\Tashil\Contracts\ShouldBeUnique`. `TokenizedIdGenerator::generate()` then re-renders the id until `isUnique()` accepts it (or the attempt budget is exhausted).
+
+**Both built-in generators already implement this** — `InvoiceNumberGenerator` checks `invoice_number` and `TransactionIdGenerator` checks `transaction_id` against the live table before the observer stamps the row. The pre-check only narrows the collision window; the DB unique constraint stays the real guarantee under concurrency, and the host owns retry on an actual `UniqueConstraintViolationException`. A generator that omits the contract returns the rendered id immediately — no extra query.
+
+Override the contract to change the *scope* of the check — e.g. include soft-deleted rows, or scope a transaction id per gateway:
 
 ```php
 namespace App\Billing;

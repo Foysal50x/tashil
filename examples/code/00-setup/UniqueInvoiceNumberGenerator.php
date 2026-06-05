@@ -9,14 +9,16 @@ use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Services\Generators\TokenizedIdGenerator;
 
 /**
- * A custom invoice-number generator that GUARANTEES uniqueness.
+ * A custom invoice-number generator that widens the uniqueness check scope.
  *
- * The built-in InvoiceNumberGenerator renders an id from the format string and
- * returns it — collisions are caught only at insert time by the DB. Implement
- * `ShouldBeUnique` and the base TokenizedIdGenerator::generate() will instead
- * re-render until isUnique() accepts the id (bounded by maxGenerationAttempts).
+ * The built-in InvoiceNumberGenerator already implements `ShouldBeUnique` —
+ * generate() re-renders until isUnique() accepts the id (bounded by
+ * maxGenerationAttempts) before the observer stamps the row; the DB unique
+ * constraint stays the real guarantee. This subclass only changes the *scope*
+ * of that check — here, `withTrashed()` so a soft-deleted invoice's number is
+ * never reused.
  *
- * Opt in by pointing config at this class:
+ * Point config at this class:
  *
  *     // config/tashil.php
  *     'invoice' => [

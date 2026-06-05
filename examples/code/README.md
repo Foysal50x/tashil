@@ -21,7 +21,7 @@ Everything assumes the catalog from [`00-setup/CatalogSeeder.php`](00-setup/Cata
 | [`User.php`](00-setup/User.php) | Make a model `Subscribable` (`implements Subscribable` + `HasSubscriptions`); override `resolveSubscription()`. |
 | [`CatalogSeeder.php`](00-setup/CatalogSeeder.php) | Define **one feature of every type** + three packages spanning the activation models. |
 | [`WalletMeteredBilling.php`](00-setup/WalletMeteredBilling.php) | Implement `MeteredBilling` (charge-before-write, idempotent debit) for metered features. |
-| [`UniqueInvoiceNumberGenerator.php`](00-setup/UniqueInvoiceNumberGenerator.php) | Custom id generator that implements `ShouldBeUnique` to guarantee unique invoice numbers. |
+| [`UniqueInvoiceNumberGenerator.php`](00-setup/UniqueInvoiceNumberGenerator.php) | Custom id generator overriding `ShouldBeUnique` to widen the built-in uniqueness check to soft-deleted rows. |
 | [`AppServiceProvider.php`](00-setup/AppServiceProvider.php) | Bind the metered provider, set the subscribable resolver, register the billing listeners. |
 
 ## Subscription lifecycle flows

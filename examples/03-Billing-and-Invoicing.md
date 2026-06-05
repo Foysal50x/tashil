@@ -65,7 +65,7 @@ Format `#-YYMMDD-NNNNNN` results in `INV-231125-849021`.
 
 ### Guaranteed-unique numbers
 
-The built-in generator renders a number from the format and returns it; collisions are caught only by the database. To verify uniqueness up front, point `generator` at a class that extends `TokenizedIdGenerator` **and** implements `ShouldBeUnique` — `generate()` then re-renders until your `isUnique()` accepts the id (or throws `UniqueIdGenerationException` once the attempt budget is exhausted):
+The built-in generator already implements `ShouldBeUnique` — it pre-checks the rendered `invoice_number` against the live table and re-renders on a hit (the DB unique constraint remains the real guarantee; the host owns retry on an actual collision). Point `generator` at your own class to change the *scope* of that check — e.g. include soft-deleted rows — by extending `TokenizedIdGenerator` **and** implementing `ShouldBeUnique`. `generate()` re-renders until your `isUnique()` accepts the id, or throws `UniqueIdGenerationException` once the attempt budget is exhausted:
 
 ```php
 use Foysal50x\Tashil\Contracts\ShouldBeUnique;
