@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Contracts\ShouldBeUnique;
 use Foysal50x\Tashil\Exceptions\UniqueIdGenerationException;
 use Foysal50x\Tashil\Services\Generators\TokenizedIdGenerator;

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Contracts\FeatureRepositoryInterface;
 use Foysal50x\Tashil\Contracts\PackageRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Builders\PackageBuilder;
 use Foysal50x\Tashil\Enums\Period;
 use Foysal50x\Tashil\Models\Feature;

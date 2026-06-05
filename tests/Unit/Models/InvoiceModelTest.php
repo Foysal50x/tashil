@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Package;

@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Http\Middleware\EnsureFeature;
 use Foysal50x\Tashil\Http\Middleware\EnsurePlan;
 use Foysal50x\Tashil\Http\Middleware\EnsureSubscribed;

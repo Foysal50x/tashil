@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Events\UsageLimitWarning;
 use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Models\Feature;

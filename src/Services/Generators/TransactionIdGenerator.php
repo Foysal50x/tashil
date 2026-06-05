@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Services\Generators;
 
 class TransactionIdGenerator extends TokenizedIdGenerator

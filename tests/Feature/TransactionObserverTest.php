@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Transaction;
 use Foysal50x\Tashil\Services\Generators\TransactionIdGenerator;

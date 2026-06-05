@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Enums\FeatureType;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;

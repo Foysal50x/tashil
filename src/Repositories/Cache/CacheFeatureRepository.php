@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Repositories\Cache;
 
 use Foysal50x\Tashil\Contracts\FeatureRepositoryInterface;
