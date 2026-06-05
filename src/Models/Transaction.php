@@ -15,11 +15,12 @@ class Transaction extends BaseModel
     protected $guarded = [];
 
     protected $casts = [
-        'status'          => TransactionStatus::class,
-        'amount'          => 'decimal:2',
-        'refunded_amount' => 'decimal:2',
-        'refunded_at'     => 'datetime',
-        'metadata'        => 'array',
+        'status'           => TransactionStatus::class,
+        'amount'           => 'decimal:2',
+        'refunded_amount'  => 'decimal:2',
+        'refunded_at'      => 'datetime',
+        'gateway_response' => 'array',
+        'metadata'         => 'array',
     ];
 
     public function invoice(): BelongsTo

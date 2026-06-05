@@ -110,11 +110,9 @@ class TrialController extends Controller
 
         $sub = Tashil::subscription()->convertTrial($sub);
 
-        // The first invoice was issued by convertTrial(). Charge it now.
-        $invoice = $sub->invoices()
-            ->where('kind', InvoiceKind::Initial)
-            ->latest('id')
-            ->first();
+        // The first invoice was issued by convertTrial(). Fetch it via the
+        // billing API and charge it now.
+        $invoice = Tashil::billing()->latestInvoice($sub, InvoiceKind::Initial);
 
         if ($invoice !== null) {
             // Hand off to your gateway. On a synchronous charge you can pay it

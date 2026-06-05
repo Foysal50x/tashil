@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Services\PaymentGateway;
 use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Exceptions\SubscriptionException;
+use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
@@ -84,15 +85,13 @@ class CheckoutController extends Controller
     }
 
     /**
-     * Fetch the initial invoice for a freshly-created pending subscription.
-     * We can't use $user->subscription() here — a Pending sub is not "valid"
-     * and would resolve to null — so we read straight off the subscription.
+     * Fetch the initial invoice for a freshly-created pending subscription via
+     * the billing API (no direct query). We can't use $user->subscription()
+     * here — a Pending sub is not "valid" and would resolve to null.
      */
     private function initialInvoiceFor(Subscription $subscription): Invoice
     {
-        return $subscription->invoices()
-            ->where('kind', InvoiceKind::Initial)
-            ->latest('id')
-            ->firstOrFail();
+        return Tashil::billing()->latestInvoice($subscription, InvoiceKind::Initial)
+            ?? abort(500, 'Initial invoice missing for pending subscription.');
     }
 }

@@ -61,6 +61,11 @@ class Invoice extends BaseModel
         return $this->status === InvoiceStatus::Paid;
     }
 
+    public function isRefunded(): bool
+    {
+        return $this->status === InvoiceStatus::Refunded;
+    }
+
     public function isInitial(): bool
     {
         return $this->kind === InvoiceKind::Initial;
@@ -100,6 +105,20 @@ class Invoice extends BaseModel
     {
         $this->update([
             'status' => InvoiceStatus::Void,
+        ]);
+
+        return $this;
+    }
+
+    /**
+     * Move the invoice to Refunded. Recorded by BillingService::recordRefund
+     * on a full refund — Tashil reflects the host's gateway refund, it does
+     * not execute one.
+     */
+    public function markAsRefunded(): self
+    {
+        $this->update([
+            'status' => InvoiceStatus::Refunded,
         ]);
 
         return $this;

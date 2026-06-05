@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Foysal50x\Tashil\Contracts;
 
+use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Models\Invoice;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -18,6 +19,24 @@ interface InvoiceRepositoryInterface
      * Find all invoices for given subscription IDs.
      */
     public function findBySubscriptionIds(array $subscriptionIds): Collection;
+
+    /**
+     * The most recent invoice for a subscription (highest id), optionally
+     * filtered to a single `kind`. Null when the subscription has none.
+     */
+    public function latestForSubscription(int $subscriptionId, ?InvoiceKind $kind = null): ?Invoice;
+
+    /**
+     * The most recent still-Pending invoice for a subscription — the bill
+     * awaiting payment. Null when nothing is outstanding.
+     */
+    public function pendingForSubscription(int $subscriptionId): ?Invoice;
+
+    /**
+     * The most recent Pending invoice past its due date as of `$moment` — the
+     * dunning trigger. Null when nothing is overdue.
+     */
+    public function overdueForSubscription(int $subscriptionId, \DateTimeInterface $moment): ?Invoice;
 
     /**
      * Pending invoices past their due date whose subscription is in a

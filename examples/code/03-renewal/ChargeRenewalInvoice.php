@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace App\Listeners;
 
 use App\Services\PaymentGateway;
-use Foysal50x\Tashil\Enums\TransactionStatus;
 use Foysal50x\Tashil\Events\InvoiceIssued;
 use Foysal50x\Tashil\Events\SubscriptionRenewed;
+use Foysal50x\Tashil\Facades\Tashil;
 use Foysal50x\Tashil\Models\Invoice;
-use Foysal50x\Tashil\Models\Transaction;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -65,6 +63,15 @@ class ChargeRenewalInvoice implements ShouldQueue
         if (! $charge->successful()) {
             // Leave the invoice Pending. It becomes overdue at due_date and
             // dunning escalates it. Don't markPastDue here — the cron owns that.
+            // Record the failed attempt for the audit trail (optional but handy
+            // for support); it does NOT change the invoice state.
+            Tashil::billing()->recordFailedPayment(
+                invoice: $invoice,
+                gateway: 'stripe',
+                gatewayResponse: ['reason' => $charge->failureReason()],
+                metadata: ['source' => 'auto-renewal'],
+            );
+
             Log::warning('Renewal charge failed; dunning will pick it up', [
                 'invoice_id'      => $invoice->id,
                 'subscription_id' => $subscription->id,
@@ -74,27 +81,14 @@ class ChargeRenewalInvoice implements ShouldQueue
             return;
         }
 
-        $this->settle($invoice, $charge->transactionId(), (float) $invoice->amount);
-    }
-
-    /**
-     * Record the transaction and mark the renewal invoice paid in one tx.
-     * markAsPaid() is the trigger that advances the billing period.
-     */
-    private function settle(Invoice $invoice, string $gatewayTxnId, float $amount): void
-    {
-        DB::transaction(function () use ($invoice, $gatewayTxnId, $amount) {
-            Transaction::create([
-                'invoice_id'     => $invoice->id,
-                'gateway'        => 'stripe',
-                'transaction_id' => $gatewayTxnId,
-                'status'         => TransactionStatus::Success,
-                'amount'         => $amount,
-                'metadata'       => ['source' => 'auto-renewal'],
-            ]);
-
-            $invoice->markAsPaid();   // → advancePeriod() → SubscriptionRenewed
-        });
+        // One call records the transaction AND marks the invoice paid, which
+        // routes through InvoiceObserver → advancePeriod() → SubscriptionRenewed.
+        Tashil::billing()->recordPayment(
+            invoice: $invoice,
+            gateway: 'stripe',
+            transactionId: $charge->transactionId(),
+            metadata: ['source' => 'auto-renewal'],
+        );
     }
 }
 

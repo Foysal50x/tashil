@@ -1,6 +1,6 @@
 # Billing Lifecycle
 
-How a subscription moves through money-related states: **activation** (first payment), **renewal**, **dunning** (failed payment), **reactivation** (recovery), and **plan change** (proration). Tahsil owns the *state machine, the invoices, and the schedule*; the host still moves the money (charges cards, funds wallets) — see [06-Developer-Guide.md](06-Developer-Guide.md#integrating-tahsil-with-the-hosts-billing--payments).
+How a subscription moves through money-related states: **activation** (first payment), **renewal**, **dunning** (failed payment), **reactivation** (recovery), **plan change** (proration), and the **transaction ledger** (recording payments + refunds). Tahsil owns the *state machine, the invoices, the transaction ledger, and the schedule*; the host still moves the money (charges cards, funds wallets, issues gateway refunds) and reports the result back through `Tashil::billing()->record*()` — see [06-Developer-Guide.md](06-Developer-Guide.md#integrating-tahsil-with-the-hosts-billing--payments).
 
 ## State machine
 
@@ -126,6 +126,35 @@ InvoiceObserver::onPaid (lapsed status) → SubscriptionService::reactivate($sub
 
 This closes the "paid but still locked out" gap — recovery restores access, it doesn't just shift dates. `reactivate()` is a no-op for any non-lapsed status (so paying a stray invoice on a cancelled subscription does nothing).
 
+## Transaction ledger & refunds
+
+An invoice is the bill; a **transaction** (`tashil_transactions`) is the record of a payment attempt against it. Tahsil never charges or refunds at the gateway — the host does — but it records what the host reports and keeps the invoice state in lockstep. Three methods on `BillingService` (reached via `Tashil::billing()`) own this:
+
+| Method | Writes | Invoice effect | Event |
+|---|---|---|---|
+| `recordPayment($invoice, …)` | a `success` transaction | `markAsPaid()` → activate / advancePeriod / reactivate (by kind + status) | `PaymentRecorded` (+ `InvoicePaid`) |
+| `recordFailedPayment($invoice, …)` | a `failed` transaction | none — stays `Pending` for dunning | `PaymentFailed` |
+| `recordRefund($transaction, …)` | refund on the original transaction | `markAsRefunded()` on a **full** refund only | `PaymentRefunded` |
+
+```
+host gateway charges card
+  → Tashil::billing()->recordPayment($invoice, gateway, transactionId)
+      writes Transaction(status=success) + $invoice->markAsPaid()  (one DB tx)
+      → InvoiceObserver routes by kind + status (activate / advance / reactivate)
+      → PaymentRecorded (after commit)
+```
+
+**Idempotency.** `recordPayment` / `recordFailedPayment` dedupe on `UNIQUE(gateway, transaction_id)`: a re-delivered (at-least-once) webhook resolves to the row already written and never settles the invoice twice — the host no longer hand-catches `UniqueConstraintViolationException`. Pass the gateway id (`ch_…`, `txn_…`) verbatim; leave it null for cash/manual entries and `TransactionObserver` stamps a `TXN-…` id.
+
+**Refunds** record a gateway refund the host already executed. `recordRefund` accumulates `refunded_amount` (partial refunds add up), stamps `refunded_at` + `refund_reason`, and:
+
+- **partial** (cumulative refund < charge) → transaction stays `Success`, invoice stays `Paid`.
+- **full** (cumulative refund reaches the charge) → transaction flips to `Refunded`, invoice moves to `Refunded`.
+
+A full refund does **not** auto-cancel the subscription — entitlement is a separate host decision (cancel / expire as your policy dictates). Refunding more than the refundable balance, or refunding a non-`Success` transaction, throws `InvalidArgumentException`.
+
+Tahsil records the money events; it never moves the money. See [06-Developer-Guide.md](06-Developer-Guide.md#recording-payments-failures-and-refunds) for the host-side recipes.
+
 ## Plan change & proration
 
 Two ways to move plans:
@@ -163,5 +192,8 @@ Cross-currency proration throws — cancel and resubscribe instead.
 | `SubscriptionSuspended` | dunning retries exhausted — access cut |
 | `SubscriptionReactivated` | lapsed subscription recovered by payment |
 | `SubscriptionPlanChanged` | in-place plan change (upgrade/lateral) — carries the proration amount + invoice |
+| `PaymentRecorded` | `recordPayment()` wrote a successful transaction — carries the transaction + invoice |
+| `PaymentFailed` | `recordFailedPayment()` wrote a failed transaction — carries the transaction + invoice |
+| `PaymentRefunded` | `recordRefund()` recorded a refund — carries the transaction (cumulative `refunded_amount`) + invoice |
 
 See [05-Reporting-Data-Model.md](05-Reporting-Data-Model.md) for the corresponding event-store `event_type`s.

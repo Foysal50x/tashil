@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foysal50x\Tashil\Repositories\Cache;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
+use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Managers\CacheManager;
 use Foysal50x\Tashil\Models\Invoice;
 use Illuminate\Database\Eloquent\Collection;
@@ -39,6 +40,23 @@ class CacheInvoiceRepository extends BaseCacheRepository implements InvoiceRepos
     {
         // Don't cache multi-subscription queries (too complex key; rare operation)
         return $this->repository->findBySubscriptionIds($subscriptionIds);
+    }
+
+    public function latestForSubscription(int $subscriptionId, ?InvoiceKind $kind = null): ?Invoice
+    {
+        // Per-subscription invoice reads change on every payment / dunning step;
+        // always hit the source so callers never see a stale status.
+        return $this->repository->latestForSubscription($subscriptionId, $kind);
+    }
+
+    public function pendingForSubscription(int $subscriptionId): ?Invoice
+    {
+        return $this->repository->pendingForSubscription($subscriptionId);
+    }
+
+    public function overdueForSubscription(int $subscriptionId, \DateTimeInterface $moment): ?Invoice
+    {
+        return $this->repository->overdueForSubscription($subscriptionId, $moment);
     }
 
     public function dueForDunning(\DateTimeInterface $moment): Collection

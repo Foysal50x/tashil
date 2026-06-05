@@ -5,14 +5,11 @@ declare(strict_types=1);
 namespace App\Listeners;
 
 use App\Services\PaymentGateway;
-use Foysal50x\Tashil\Enums\TransactionStatus;
 use Foysal50x\Tashil\Events\SubscriptionPastDue;
 use Foysal50x\Tashil\Events\SubscriptionReactivated;
 use Foysal50x\Tashil\Events\SubscriptionSuspended;
-use Foysal50x\Tashil\Models\Invoice;
-use Foysal50x\Tashil\Models\Transaction;
+use Foysal50x\Tashil\Facades\Tashil;
 use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -70,19 +67,14 @@ class RetryDunningCharge implements ShouldQueue
             return;
         }
 
-        // Recovered. markAsPaid() routes through InvoiceObserver → reactivate().
-        DB::transaction(function () use ($invoice, $charge) {
-            Transaction::create([
-                'invoice_id'     => $invoice->id,
-                'gateway'        => 'stripe',
-                'transaction_id' => $charge->transactionId(),
-                'status'         => TransactionStatus::Success,
-                'amount'         => (float) $invoice->amount,
-                'metadata'       => ['source' => 'dunning-retry'],
-            ]);
-
-            $invoice->markAsPaid();
-        });
+        // Recovered. recordPayment() writes the transaction and marks the invoice
+        // paid, which routes through InvoiceObserver → reactivate().
+        Tashil::billing()->recordPayment(
+            invoice: $invoice,
+            gateway: 'stripe',
+            transactionId: $charge->transactionId(),
+            metadata: ['source' => 'dunning-retry'],
+        );
     }
 }
 

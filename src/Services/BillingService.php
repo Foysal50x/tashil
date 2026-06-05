@@ -5,16 +5,41 @@ declare(strict_types=1);
 namespace Foysal50x\Tashil\Services;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
+use Foysal50x\Tashil\Contracts\TransactionRepositoryInterface;
 use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
+use Foysal50x\Tashil\Enums\TransactionStatus;
+use Foysal50x\Tashil\Events\PaymentFailed;
+use Foysal50x\Tashil\Events\PaymentRecorded;
+use Foysal50x\Tashil\Events\PaymentRefunded;
+use Foysal50x\Tashil\Managers\DatabaseManager;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Subscription;
+use Foysal50x\Tashil\Models\Transaction;
+use Foysal50x\Tashil\Traits\DispatchesEventsAfterCommit;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Config;
+use InvalidArgumentException;
 
+/**
+ * Issues invoices and records the money events the host reports back.
+ *
+ * Tashil never touches a gateway: the host charges cards / funds wallets and
+ * executes refunds, then tells Tashil what happened through the `record*`
+ * methods below. Each one writes the Transaction audit row and reflects the
+ * resulting Invoice state (paid / refunded), keeping the two in lockstep so a
+ * settled invoice always has a matching transaction. Idempotency rides on the
+ * `UNIQUE(gateway, transaction_id)` reconciliation key, so an at-least-once
+ * webhook is safe to replay.
+ */
 class BillingService
 {
+    use DispatchesEventsAfterCommit;
+
     public function __construct(
         protected InvoiceRepositoryInterface $invoiceRepo,
+        protected TransactionRepositoryInterface $transactionRepo,
+        protected DatabaseManager $db,
     ) {}
 
     /**
@@ -64,5 +89,239 @@ class BillingService
             periodStart: now(),
             dueDays: $dueDays,
         );
+    }
+
+    /**
+     * The most recent invoice for a subscription, optionally filtered to a
+     * single `kind` (e.g. the latest `initial` invoice for a pending sub).
+     * Prefer this over querying the Invoice model directly.
+     */
+    public function latestInvoice(Subscription $subscription, ?InvoiceKind $kind = null): ?Invoice
+    {
+        return $this->invoiceRepo->latestForSubscription($subscription->id, $kind);
+    }
+
+    /**
+     * The outstanding (still-Pending) invoice for a subscription — the bill the
+     * customer needs to pay. Null when nothing is due.
+     */
+    public function pendingInvoice(Subscription $subscription): ?Invoice
+    {
+        return $this->invoiceRepo->pendingForSubscription($subscription->id);
+    }
+
+    /**
+     * The overdue (Pending + past due date) invoice for a subscription — the
+     * one driving the dunning cycle. Null when nothing is overdue.
+     */
+    public function overdueInvoice(Subscription $subscription): ?Invoice
+    {
+        return $this->invoiceRepo->overdueForSubscription($subscription->id, now());
+    }
+
+    /**
+     * The most recent successful transaction recorded against an invoice — the
+     * charge a refund targets. Null when the invoice has no settled charge.
+     */
+    public function successfulTransaction(Invoice $invoice): ?Transaction
+    {
+        return $this->transactionRepo->latestSuccessfulForInvoice($invoice->id);
+    }
+
+    /**
+     * Record a successful payment the host captured at the gateway, then mark
+     * the invoice paid — both in one transaction so there is never a paid
+     * invoice without its audit row. Marking the invoice paid is what the
+     * InvoiceObserver reacts to (activate / advance / reactivate), so callers
+     * should NOT also call markAsPaid() themselves.
+     *
+     * Idempotent on (gateway, transaction_id): a re-delivered webhook resolves
+     * to the row already written and does not re-settle the invoice. Pass the
+     * gateway-supplied id (`ch_…`, `txn_…`) verbatim; leave it null for
+     * cash/manual entries and TransactionObserver stamps a `TXN-…` id.
+     *
+     * @param  float|null  $amount  Defaults to the invoice's full amount.
+     */
+    public function recordPayment(
+        Invoice $invoice,
+        ?float $amount = null,
+        string $gateway = 'manual',
+        ?string $transactionId = null,
+        array $gatewayResponse = [],
+        array $metadata = [],
+    ): Transaction {
+        $amount ??= (float) $invoice->amount;
+
+        if ($amount <= 0) {
+            throw new InvalidArgumentException('Payment amount must be greater than zero.');
+        }
+
+        // Idempotency fast-path: this exact charge was already recorded (and
+        // therefore already settled the invoice on its first delivery).
+        if ($transactionId !== null) {
+            $existing = $this->transactionRepo->findByGatewayTransaction($gateway, $transactionId);
+
+            if ($existing !== null) {
+                return $existing;
+            }
+        }
+
+        return $this->db->connection()->transaction(function () use (
+            $invoice,
+            $amount,
+            $gateway,
+            $transactionId,
+            $gatewayResponse,
+            $metadata,
+        ) {
+            try {
+                $transaction = $this->transactionRepo->create([
+                    'invoice_id'       => $invoice->id,
+                    'gateway'          => $gateway,
+                    'transaction_id'   => $transactionId,
+                    'status'           => TransactionStatus::Success,
+                    'amount'           => $amount,
+                    'currency'         => $invoice->currency,
+                    'gateway_response' => $gatewayResponse ?: null,
+                    'metadata'         => $metadata ?: null,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                // A concurrent delivery won the race — return its row.
+                return $this->transactionRepo->findByGatewayTransaction($gateway, (string) $transactionId);
+            }
+
+            // The single line Tashil reacts to. InvoiceObserver routes by
+            // kind + subscription status from here.
+            if (! $invoice->isPaid()) {
+                $invoice->markAsPaid();
+            }
+
+            $this->dispatchAfterCommit(fn () => PaymentRecorded::dispatch($transaction, $invoice));
+
+            return $transaction;
+        });
+    }
+
+    /**
+     * Record a failed charge attempt for audit. The invoice is left Pending so
+     * the dunning cycle keeps retrying — this writes a `failed` transaction and
+     * fires PaymentFailed, it does not transition the invoice. Idempotent on
+     * (gateway, transaction_id) when the gateway supplies one.
+     *
+     * @param  float|null  $amount  Defaults to the invoice's full amount.
+     */
+    public function recordFailedPayment(
+        Invoice $invoice,
+        ?float $amount = null,
+        string $gateway = 'manual',
+        ?string $transactionId = null,
+        array $gatewayResponse = [],
+        array $metadata = [],
+    ): Transaction {
+        $amount ??= (float) $invoice->amount;
+
+        if ($transactionId !== null) {
+            $existing = $this->transactionRepo->findByGatewayTransaction($gateway, $transactionId);
+
+            if ($existing !== null) {
+                return $existing;
+            }
+        }
+
+        return $this->db->connection()->transaction(function () use (
+            $invoice,
+            $amount,
+            $gateway,
+            $transactionId,
+            $gatewayResponse,
+            $metadata,
+        ) {
+            try {
+                $transaction = $this->transactionRepo->create([
+                    'invoice_id'       => $invoice->id,
+                    'gateway'          => $gateway,
+                    'transaction_id'   => $transactionId,
+                    'status'           => TransactionStatus::Failed,
+                    'amount'           => $amount,
+                    'currency'         => $invoice->currency,
+                    'gateway_response' => $gatewayResponse ?: null,
+                    'metadata'         => $metadata ?: null,
+                ]);
+            } catch (UniqueConstraintViolationException) {
+                return $this->transactionRepo->findByGatewayTransaction($gateway, (string) $transactionId);
+            }
+
+            $this->dispatchAfterCommit(fn () => PaymentFailed::dispatch($transaction, $invoice));
+
+            return $transaction;
+        });
+    }
+
+    /**
+     * Record a refund the host already executed at the gateway. Updates the
+     * original transaction's cumulative `refunded_amount` / `refunded_at` /
+     * `refund_reason`; once fully refunded the transaction flips to Refunded
+     * and the invoice is moved to Refunded. Partial refunds keep the
+     * transaction Success (and the invoice Paid) so further refunds remain
+     * possible up to the original amount. Fires PaymentRefunded.
+     *
+     * Tashil records the refund only — the money was moved by the host.
+     *
+     * @param  float|null  $amount  Defaults to the remaining refundable amount.
+     */
+    public function recordRefund(
+        Transaction $transaction,
+        ?float $amount = null,
+        ?string $reason = null,
+        array $metadata = [],
+    ): Transaction {
+        if ($transaction->status !== TransactionStatus::Success) {
+            throw new InvalidArgumentException('Only a successful transaction can be refunded.');
+        }
+
+        $alreadyRefunded = (float) ($transaction->refunded_amount ?? 0);
+        $remaining = (float) $transaction->amount - $alreadyRefunded;
+        $amount ??= $remaining;
+
+        if ($amount <= 0) {
+            throw new InvalidArgumentException('Refund amount must be greater than zero.');
+        }
+
+        if ($amount > $remaining + 0.0001) {
+            throw new InvalidArgumentException('Refund amount exceeds the refundable balance of the transaction.');
+        }
+
+        return $this->db->connection()->transaction(function () use (
+            $transaction,
+            $amount,
+            $alreadyRefunded,
+            $reason,
+            $metadata,
+        ) {
+            $newRefunded = round($alreadyRefunded + $amount, 2);
+            $isFull = $newRefunded >= (float) $transaction->amount - 0.0001;
+
+            $transaction->forceFill([
+                'refunded_amount' => $newRefunded,
+                'refunded_at'     => now(),
+                'refund_reason'   => $reason,
+                'status'          => $isFull ? TransactionStatus::Refunded : TransactionStatus::Success,
+                'metadata'        => $metadata ? array_merge($transaction->metadata ?? [], $metadata) : $transaction->metadata,
+            ])->save();
+
+            $invoice = $transaction->invoice()->first();
+
+            // A full refund settles the invoice as Refunded; a partial refund
+            // leaves it Paid (the host still kept part of the payment).
+            if ($invoice !== null && $isFull && ! $invoice->isRefunded()) {
+                $invoice->markAsRefunded();
+            }
+
+            if ($invoice !== null) {
+                $this->dispatchAfterCommit(fn () => PaymentRefunded::dispatch($transaction, $invoice));
+            }
+
+            return $transaction;
+        });
     }
 }

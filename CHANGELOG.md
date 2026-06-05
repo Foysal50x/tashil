@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Transaction ledger API** — `BillingService::recordPayment()`,
+  `recordFailedPayment()`, and `recordRefund()` (via `Tashil::billing()`) record the
+  payments/refunds the host's gateway executes, each writing the `Transaction`
+  audit row **and** reflecting the invoice state in one DB transaction. Tashil
+  still never moves money — these only *record* what the host reports.
+  - `recordPayment()` writes a `success` transaction and marks the invoice paid
+    (routing through `InvoiceObserver` → activate / advancePeriod / reactivate).
+  - `recordFailedPayment()` writes a `failed` transaction and leaves the invoice
+    `Pending` for dunning.
+  - `recordRefund()` accumulates `refunded_amount` (partials supported); a full
+    refund flips the transaction to `Refunded` and the invoice to `Refunded`.
+  - `recordPayment` / `recordFailedPayment` are idempotent on
+    `UNIQUE(gateway, transaction_id)` — a replayed at-least-once webhook resolves
+    to the existing row and never double-settles.
+- **`TransactionRepositoryInterface` + `EloquentTransactionRepository`** — the
+  transaction ledger now sits behind an overridable repository like every other
+  persistence concern.
+- **Events** `PaymentRecorded`, `PaymentFailed`, `PaymentRefunded` — carry the
+  transaction + invoice, dispatched after commit.
+- **`Invoice::markAsRefunded()` / `Invoice::isRefunded()`** and a
+  `gateway_response` array cast on `Transaction`.
+- **Invoice/transaction read API** on `BillingService` (`Tashil::billing()`):
+  `latestInvoice($sub, ?InvoiceKind)`, `pendingInvoice($sub)`,
+  `overdueInvoice($sub)`, and `successfulTransaction($invoice)` — so host code
+  reads invoices through the (overridable) repository instead of querying the
+  `Invoice` model directly. Backed by new `InvoiceRepositoryInterface` methods
+  (`latestForSubscription`, `pendingForSubscription`, `overdueForSubscription`)
+  and `TransactionRepositoryInterface::latestSuccessfulForInvoice`; these read
+  paths are uncached (per-subscription invoices change on every payment/dunning
+  step).
+
+### Changed
+
+- Cookbook examples (`PaymentWebhookController`, `ChargeRenewalInvoice`,
+  `DunningListeners`) now use `recordPayment()` / `recordFailedPayment()` instead
+  of hand-written `Transaction::create()` + `markAsPaid()`; added a
+  `RefundController` example. `CheckoutController`, `TrialController`, and
+  `SuspensionController` now read invoices via the billing API instead of direct
+  `Invoice` queries. Billing docs document the ledger + refund flow and the read
+  API.
+
+### Fixed
+
+- **`TransactionIdGenerator` uniqueness is now scoped to the gateway.** It takes
+  the row's gateway via a new constructor argument (passed by
+  `TransactionObserver`) and checks the composite `(gateway, transaction_id)` —
+  matching the DB constraint — instead of the bare `transaction_id`. The old
+  global check wrongly rejected (and regenerated) an id that already existed
+  under a *different* gateway; the same id can legitimately exist per gateway.
+  Custom transaction generators may declare a `string $gateway` constructor
+  parameter to receive it.
+
 ## [1.0.0-beta] - 2026-06-05
 
 First public beta. Subscription + feature management for Laravel with an

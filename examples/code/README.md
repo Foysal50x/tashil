@@ -37,13 +37,14 @@ Everything assumes the catalog from [`00-setup/CatalogSeeder.php`](00-setup/Cata
 | File | What it shows |
 |---|---|
 | [`CheckoutController.php`](02-paid-invoice/CheckoutController.php) | Subscribe a priced plan → `Pending` + initial invoice; hand the client a payment intent. |
-| [`PaymentWebhookController.php`](02-paid-invoice/PaymentWebhookController.php) | Gateway webhook → record `Transaction` → `markAsPaid()` → auto-activate. Idempotent. |
+| [`PaymentWebhookController.php`](02-paid-invoice/PaymentWebhookController.php) | Gateway webhook → `Tashil::billing()->recordPayment()` (records the transaction **and** settles + auto-activates, idempotent). |
+| [`RefundController.php`](02-paid-invoice/RefundController.php) | Host refunds at the gateway → `Tashil::billing()->recordRefund()` (full/partial, flips the invoice to Refunded on a full refund). |
 | [`ProvisionOnActivation.php`](02-paid-invoice/ProvisionOnActivation.php) | React to `SubscriptionActivated` to provision the account. |
 
 ### 3. Renewal — `03-renewal/`
 | File | What it shows |
 |---|---|
-| [`ChargeRenewalInvoice.php`](03-renewal/ChargeRenewalInvoice.php) | `InvoiceIssued` (renewal) → charge saved card → `markAsPaid()` → `advancePeriod()`. Plus the receipt listener. |
+| [`ChargeRenewalInvoice.php`](03-renewal/ChargeRenewalInvoice.php) | `InvoiceIssued` (renewal) → charge saved card → `recordPayment()` → `advancePeriod()` (failed attempts logged via `recordFailedPayment()`). Plus the receipt listener. |
 | [`RegisterRenewalCommand.php`](03-renewal/RegisterRenewalCommand.php) | Register `tashil:renew-subscriptions`; why the cron never advances the period itself. |
 
 ### 4. Suspend / dunning — `04-suspend/`
@@ -78,8 +79,10 @@ Everything assumes the catalog from [`00-setup/CatalogSeeder.php`](00-setup/Cata
 
 ## The one mental model to keep
 
-Tashil owns **subscription state, counters, invoicing, and the dunning state
-machine**. It never moves money. Every "charge" in these examples is the host's
-gateway; the package only reacts to your `Invoice::markAsPaid()` (which routes
-by invoice kind → `activate` / `advancePeriod` / `reactivate`) and to
-`MeteredBilling::charge()` for metered features.
+Tashil owns **subscription state, counters, invoicing, the transaction ledger,
+and the dunning state machine**. It never moves money. Every "charge" / "refund"
+in these examples is the host's gateway; you then tell Tashil what happened with
+`Tashil::billing()->recordPayment()` / `recordFailedPayment()` / `recordRefund()`.
+recordPayment routes through `Invoice::markAsPaid()` by invoice kind → `activate`
+/ `advancePeriod` / `reactivate`. Metered features go through
+`MeteredBilling::charge()`.

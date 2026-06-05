@@ -9,6 +9,15 @@ use Foysal50x\Tashil\Models\Transaction;
 
 class TransactionIdGenerator extends TokenizedIdGenerator implements ShouldBeUnique
 {
+    /**
+     * The gateway the generated id will be stored under. Uniqueness is checked
+     * within this gateway only — the same scope as the DB constraint — so the
+     * id is generated to be free for *this* gateway. `TransactionObserver`
+     * passes the row's gateway; defaults to `manual` (the column default) for
+     * callers that don't supply one.
+     */
+    public function __construct(protected string $gateway = 'manual') {}
+
     protected function prefix(): string
     {
         return (string) config('tashil.transaction.prefix', 'TXN');
@@ -20,13 +29,19 @@ class TransactionIdGenerator extends TokenizedIdGenerator implements ShouldBeUni
     }
 
     /**
-     * The DB uniqueness scope is `(gateway, transaction_id)`, but generated
-     * ids are only stamped for gateway-less manual/cash entries, so a global
-     * `transaction_id` pre-check is correct and slightly stricter. The
-     * composite constraint stays the real guarantee under concurrency.
+     * The DB uniqueness scope is the composite `(gateway, transaction_id)`, and
+     * this pre-check mirrors it exactly by scoping to the same gateway. The same
+     * `transaction_id` legitimately exists under a *different* gateway (e.g. a
+     * manual id that happens to match a Stripe charge id), so checking it
+     * globally would wrongly reject a perfectly valid id; scoping to the gateway
+     * avoids that. The composite constraint stays the real guarantee under
+     * concurrency.
      */
     public function isUnique(string $id): bool
     {
-        return ! Transaction::query()->where('transaction_id', $id)->exists();
+        return ! Transaction::query()
+            ->where('gateway', $this->gateway)
+            ->where('transaction_id', $id)
+            ->exists();
     }
 }

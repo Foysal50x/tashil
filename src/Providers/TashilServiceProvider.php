@@ -19,6 +19,7 @@ use Foysal50x\Tashil\Contracts\PackageRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionEventRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionFeatureRepositoryInterface;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
+use Foysal50x\Tashil\Contracts\TransactionRepositoryInterface;
 use Foysal50x\Tashil\Contracts\UsageLogRepositoryInterface;
 use Foysal50x\Tashil\Http\Middleware\EnsureFeature;
 use Foysal50x\Tashil\Http\Middleware\EnsurePlan;
@@ -40,6 +41,7 @@ use Foysal50x\Tashil\Repositories\EloquentPackageRepository;
 use Foysal50x\Tashil\Repositories\EloquentSubscriptionEventRepository;
 use Foysal50x\Tashil\Repositories\EloquentSubscriptionFeatureRepository;
 use Foysal50x\Tashil\Repositories\EloquentSubscriptionRepository;
+use Foysal50x\Tashil\Repositories\EloquentTransactionRepository;
 use Foysal50x\Tashil\Repositories\EloquentUsageLogRepository;
 use Foysal50x\Tashil\Services\AnalyticsService;
 use Foysal50x\Tashil\Services\BillingService;
@@ -192,6 +194,9 @@ class TashilServiceProvider extends ServiceProvider
         $this->app->singleton(FeatureUsageRepositoryInterface::class, fn () => new EloquentFeatureUsageRepository);
         $this->app->singleton(SubscriptionFeatureRepositoryInterface::class, fn () => new EloquentSubscriptionFeatureRepository);
         $this->app->singleton(SubscriptionEventRepositoryInterface::class, fn () => new EloquentSubscriptionEventRepository);
+
+        // Financial audit rows — append-only, not cached.
+        $this->app->singleton(TransactionRepositoryInterface::class, fn () => new EloquentTransactionRepository);
     }
 
     protected function registerServices(): void
