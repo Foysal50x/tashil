@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Models;
 
 use Foysal50x\Tashil\Database\Factories\PackageFactory;
@@ -20,6 +22,20 @@ class Package extends BaseModel
         return PackageFactory::new();
     }
 
+    protected static function booted(): void
+    {
+        // Seed requires_payment from the install-wide default ONLY when the
+        // caller didn't set it explicitly. After creation the stored flag is
+        // authoritative — SubscriptionService::requiresPayment() reads the
+        // package, never the config — so flipping the default later never
+        // silently demotes a package that was deliberately marked true.
+        static::creating(function (Package $package): void {
+            if (! array_key_exists('requires_payment', $package->getAttributes())) {
+                $package->requires_payment = (bool) Config::get('tashil.billing.activate_on_payment', true);
+            }
+        });
+    }
+
     protected $guarded = [];
 
     protected $casts = [
@@ -28,13 +44,12 @@ class Package extends BaseModel
         'original_price'   => 'decimal:2',
         'billing_interval' => 'integer',
         'trial_days'       => 'integer',
+        'requires_payment' => 'boolean',
         'is_active'        => 'boolean',
         'is_featured'      => 'boolean',
         'sort_order'       => 'integer',
         'metadata'         => 'array',
     ];
-
-    // ── Relationships ────────────────────────────────────────────
 
     public function features(): BelongsToMany
     {
@@ -50,8 +65,6 @@ class Package extends BaseModel
     {
         return $this->hasMany(Subscription::class);
     }
-
-    // ── Scopes ───────────────────────────────────────────────────
 
     public function scopeActive(Builder $query): Builder
     {

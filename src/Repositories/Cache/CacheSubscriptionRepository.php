@@ -1,13 +1,15 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Repositories\Cache;
 
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
 use Foysal50x\Tashil\Managers\CacheManager;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
 
 /**
  * @property SubscriptionRepositoryInterface $repository
@@ -23,12 +25,10 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         parent::__construct($repository, $cacheManager, $cacheTtl, $cachePrefix);
     }
 
-    // ── Write-through (invalidate cache) ────────────────────────
-
     public function create(array $data): Subscription
     {
         $result = $this->repository->create($data);
-        $this->invalidateSubscriberCache($result->subscriber_type, $result->subscriber_id);
+        $this->invalidateSubscriberCache($result);
         $this->invalidateAggregates();
 
         return $result;
@@ -36,8 +36,9 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
 
     public function update(Subscription $subscription, array $data): Subscription
     {
+        $previousPackageId = $subscription->getOriginal('package_id');
         $result = $this->repository->update($subscription, $data);
-        $this->invalidateSubscriberCache($subscription->subscriber_type, $subscription->subscriber_id);
+        $this->invalidateSubscriberCache($result, $previousPackageId);
         $this->invalidateAggregates();
 
         return $result;
@@ -48,7 +49,11 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         $this->repository->syncFeatures($subscription, $package);
     }
 
-    // ── Cached reads ────────────────────────────────────────────
+    public function resyncFeatures(Subscription $subscription, Package $package, bool $carryUsage = true): void
+    {
+        $this->repository->resyncFeatures($subscription, $package, $carryUsage);
+        $this->invalidateSubscriberCache($subscription);
+    }
 
     public function findById(int $id): ?Subscription
     {
@@ -57,14 +62,14 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         return $this->remember($key, fn () => $this->repository->findById($id));
     }
 
-    public function findValidForSubscriber(Model $subscriber): ?Subscription
+    public function findValidForSubscriber(Subscribable $subscriber): ?Subscription
     {
         $key = $this->subscriberKey($subscriber, 'valid');
 
         return $this->remember($key, fn () => $this->repository->findValidForSubscriber($subscriber));
     }
 
-    public function subscriberHasValidSubscription(Model $subscriber, Package|string|null $package = null): bool
+    public function subscriberHasValidSubscription(Subscribable $subscriber, Package|string|null $package = null): bool
     {
         $suffix = $package instanceof Package ? "has:{$package->id}" : 'has:' . ($package ?? 'any');
         $key = $this->subscriberKey($subscriber, $suffix);
@@ -74,7 +79,14 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         });
     }
 
-    public function findCancelledResumable(Model $subscriber): ?Subscription
+    public function hasLiveSubscription(Subscribable $subscriber): bool
+    {
+        // Not cached — a correctness guard on subscribe() must see writes
+        // immediately.
+        return $this->repository->hasLiveSubscription($subscriber);
+    }
+
+    public function findCancelledResumable(Subscribable $subscriber): ?Subscription
     {
         // Not cached — rare operation
         return $this->repository->findCancelledResumable($subscriber);
@@ -104,8 +116,6 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
     {
         return $this->repository->dueForPendingChange($moment);
     }
-
-    // ── Cached aggregates ───────────────────────────────────────
 
     public function activeCount(): int
     {
@@ -186,21 +196,47 @@ class CacheSubscriptionRepository extends BaseCacheRepository implements Subscri
         return $this->remember($key, fn () => $this->repository->analyticsByPackage());
     }
 
-    // ── Internal ────────────────────────────────────────────────
-
-    protected function subscriberKey(Model $subscriber, string $suffix): string
+    protected function subscriberKey(Subscribable $subscriber, string $suffix): string
     {
-        return 'subscription:' . class_basename($subscriber) . ":{$subscriber->getKey()}:{$suffix}";
+        return 'subscription:'
+            . class_basename($subscriber->getSubscriberType())
+            . ":{$subscriber->getSubscriberKey()}:{$suffix}";
     }
 
-    protected function invalidateSubscriberCache(string $type, int|string $id): void
+    /**
+     * Forget the cache entries that depend on the subscriber's current
+     * subscription state. We can't pattern-scan the cache for every
+     * `has:{package_id}` key that was ever queried, so we forget the
+     * package the subscription is now on AND the package it just moved
+     * off of (for plan switches). Cross-package has:Z queries for
+     * packages this subscription never touched will stale until TTL,
+     * which is acceptable for an answer that was always "false".
+     */
+    protected function invalidateSubscriberCache(Subscription $subscription, int|string|null $previousPackageId = null): void
     {
-        $base = class_basename($type);
-        $key1 = "subscription:{$base}:{$id}:valid";
-        $key2 = "subscription:{$base}:{$id}:has:any";
+        $base = class_basename($subscription->subscriber_type);
+        $id = $subscription->subscriber_id;
 
-        $this->forget($key1);
-        $this->forget($key2);
+        $this->forget("subscription:{$base}:{$id}:valid");
+        $this->forget("subscription:{$base}:{$id}:has:any");
+
+        $packageIds = array_filter(
+            array_unique([$subscription->package_id, $previousPackageId]),
+            fn ($v) => $v !== null,
+        );
+
+        foreach ($packageIds as $packageId) {
+            $this->forget("subscription:{$base}:{$id}:has:{$packageId}");
+        }
+
+        // subscriberHasValidSubscription also accepts a string slug; cover
+        // the slug-keyed entries for the current package. Previous slugs
+        // can't be resolved without re-hydrating the deleted relation, so
+        // they're left to TTL (uncommon path).
+        $currentSlug = $subscription->package?->slug;
+        if (is_string($currentSlug) && $currentSlug !== '') {
+            $this->forget("subscription:{$base}:{$id}:has:{$currentSlug}");
+        }
     }
 
     protected function invalidateAggregates(): void

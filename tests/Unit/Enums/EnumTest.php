@@ -1,28 +1,28 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Enums\FeatureType;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Enums\Period;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Enums\TransactionStatus;
 
-// ── FeatureType ─────────────────────────────────────────────────
-
 it('has correct FeatureType cases', function () {
-    expect(FeatureType::cases())->toHaveCount(4);
+    expect(FeatureType::cases())->toHaveCount(5);
     expect(FeatureType::Boolean->value)->toBe('boolean');
     expect(FeatureType::Limit->value)->toBe('limit');
     expect(FeatureType::Consumable->value)->toBe('consumable');
     expect(FeatureType::Enum->value)->toBe('enum');
+    expect(FeatureType::Metered->value)->toBe('metered');
 });
 
 it('can create FeatureType from value', function () {
     expect(FeatureType::from('boolean'))->toBe(FeatureType::Boolean);
     expect(FeatureType::from('limit'))->toBe(FeatureType::Limit);
     expect(FeatureType::from('consumable'))->toBe(FeatureType::Consumable);
+    expect(FeatureType::from('metered'))->toBe(FeatureType::Metered);
 });
-
-// ── Period ───────────────────────────────────────────────────────
 
 it('has correct Period cases', function () {
     expect(Period::cases())->toHaveCount(5);
@@ -32,8 +32,6 @@ it('has correct Period cases', function () {
     expect(Period::Year->value)->toBe('year');
     expect(Period::Lifetime->value)->toBe('lifetime');
 });
-
-// ── SubscriptionStatus ──────────────────────────────────────────
 
 it('has correct SubscriptionStatus cases', function () {
     expect(SubscriptionStatus::cases())->toHaveCount(9);
@@ -48,8 +46,6 @@ it('has correct SubscriptionStatus cases', function () {
     expect(SubscriptionStatus::Suspended->value)->toBe('suspended');
 });
 
-// ── InvoiceStatus ───────────────────────────────────────────────
-
 it('has correct InvoiceStatus cases', function () {
     expect(InvoiceStatus::cases())->toHaveCount(5);
     expect(InvoiceStatus::Draft->value)->toBe('draft');
@@ -58,8 +54,6 @@ it('has correct InvoiceStatus cases', function () {
     expect(InvoiceStatus::Void->value)->toBe('void');
     expect(InvoiceStatus::Refunded->value)->toBe('refunded');
 });
-
-// ── TransactionStatus ───────────────────────────────────────────
 
 it('has correct TransactionStatus cases', function () {
     expect(TransactionStatus::cases())->toHaveCount(4);

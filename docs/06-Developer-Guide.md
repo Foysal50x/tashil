@@ -33,33 +33,35 @@ Tahsil's own auto-registration (`tashil.schedule.enabled = true`) handles all ve
 src/
   Builders/           PackageBuilder, FeatureBuilder — fluent catalog construction
   Console/            Six scheduled commands
-  Contracts/          Repository interfaces — swap implementations freely
-  Enums/              SubscriptionStatus, FeatureType, ResetPeriod, UsageOperation,
-                      InvoiceStatus, TransactionStatus, Period
-  Events/             Subscription / Trial / Invoice / Usage domain events
+  Contracts/          Subscribable, MeteredBilling, repository interfaces
+  Enums/              SubscriptionStatus, FeatureType (incl. Metered), ResetPeriod,
+                      UsageOperation, InvoiceStatus, TransactionStatus, Period
+  Events/             Subscription / Trial / Invoice / Usage / Metered events
+  Exceptions/         MeteredBillingNotConfiguredException
   Facades/            Tashil facade
-  Http/               Reserved (no controllers ship by default)
+  Http/Middleware/    EnsureSubscribed, EnsurePlan, EnsureFeature
   Managers/           DatabaseManager, CacheManager
   Models/             Eloquent models incl. immutable SubscriptionEvent /
                       SubscriptionFeature / FeatureUsage / UsageLog
   Observers/          InvoiceObserver (auto-number + paid-handler),
                       TransactionObserver (auto-id when blank)
-  Providers/          TashilServiceProvider — registration + schedule wiring
+  Providers/          TashilServiceProvider — registration + middleware + schedule
   Repositories/       EloquentXRepository + Cache decorators
   Services/           SubscriptionService, UsageService, BillingService,
-                      AnalyticsService, EventStore, Resetter
+                      AnalyticsService, EventStore, Resetter,
+                      Providers/NullMeteredBilling
   Support/            DateFmt and friends
   Traits/             HasSubscriptions
-  Tashil.php          Service facade with sub-accessors
+  Tashil.php          Service facade with sub-accessors + resolveSubscribable
 
 database/
   factories/          Model factories used by the test suite
   migrations/         Single migration that creates all tables
 
 tests/
-  Feature/            Integration tests
+  Feature/            Integration tests (Metered, Middleware, SubscribableContract, ...)
   Unit/               Builder / Model / Enum tests
-  Fixtures/           User fixture for trait tests
+  Fixtures/           User fixture + FakeMeteredBilling for tests
 ```
 
 ## Layering
@@ -135,7 +137,7 @@ Both `tashil_invoices.invoice_number` and `tashil_transactions.transaction_id` a
 
 The transaction observer only fires when the row is created without a `transaction_id` — gateway-driven flows that already have a Stripe / Paddle / … id should pass it through and the observer leaves it alone. The auto-id path covers cases like an admin recording a cash payment.
 
-Both built-in generators share `TokenizedIdGenerator`, an abstract base that owns the token grammar (`#`, `YY`, `MM`, `DD`, `N`, `S`, `A`) and the `generate()` body. Subclasses declare only which config keys to read:
+Both built-in generators share `TokenizedIdGenerator`, an abstract base that owns the token grammar (`#`, `YY`, `MM`, `DD`, `N`, `S`, `A`). It renders one id from the template in `build()`, and `generate()` wraps that — returning it directly, or (for a `ShouldBeUnique` generator) re-rendering until `isUnique()` accepts it. Subclasses declare only which config keys to read:
 
 ```php
 namespace Foysal50x\Tashil\Services\Generators;
@@ -167,6 +169,49 @@ class StripeStyleGenerator
 ```
 
 Format-token entropy matters at bulk-insert time. The defaults give ~1M (`NNNNNN`) and ~1.3B (`NNNNNNAA`) combinations per `YYMMDD` bucket; the transaction default is wider because gateways can drop several hundred webhooks per minute. Widen the format if you expect more than ~√combos rows on a single day or you will hit birthday collisions. The composite `UNIQUE(gateway, transaction_id)` is the last line of defence; a colliding generator output will surface as a `UniqueConstraintViolationException` rather than silent corruption.
+
+#### Guaranteed-unique ids
+
+Rather than relying on entropy + the DB constraint to *catch* a collision, a generator can *verify* uniqueness up front by implementing `Foysal50x\Tashil\Contracts\ShouldBeUnique`. `TokenizedIdGenerator::generate()` then re-renders the id until `isUnique()` accepts it (or the attempt budget is exhausted).
+
+**Both built-in generators already implement this** — `InvoiceNumberGenerator` checks `invoice_number` and `TransactionIdGenerator` checks `transaction_id` against the live table before the observer stamps the row. The pre-check only narrows the collision window; the DB unique constraint stays the real guarantee under concurrency, and the host owns retry on an actual `UniqueConstraintViolationException`. A generator that omits the contract returns the rendered id immediately — no extra query.
+
+Override the contract to change the *scope* of the check — e.g. include soft-deleted rows, or scope a transaction id per gateway:
+
+```php
+namespace App\Billing;
+
+use Foysal50x\Tashil\Contracts\ShouldBeUnique;
+use Foysal50x\Tashil\Models\Invoice;
+use Foysal50x\Tashil\Services\Generators\TokenizedIdGenerator;
+
+class UniqueInvoiceNumberGenerator extends TokenizedIdGenerator implements ShouldBeUnique
+{
+    protected function prefix(): string
+    {
+        return (string) config('tashil.invoice.prefix', 'INV');
+    }
+
+    protected function format(): string
+    {
+        return (string) config('tashil.invoice.format', '#-YYMMDD-NNNNNN');
+    }
+
+    // Verify against the live table. Return false to force another render.
+    public function isUnique(string $id): bool
+    {
+        return ! Invoice::withTrashed()->where('invoice_number', $id)->exists();
+    }
+
+    // Optional: widen the retry budget for tight formats (default 10).
+    protected function maxGenerationAttempts(): int
+    {
+        return 25;
+    }
+}
+```
+
+Point the config at it: `'generator' => \App\Billing\UniqueInvoiceNumberGenerator::class`. If the format space is too small to find a free id within `maxGenerationAttempts()`, `generate()` throws `Foysal50x\Tashil\Exceptions\UniqueIdGenerationException` (a `RuntimeException` subclass) — a signal to widen the format, not to retry. Keep `isUnique()` a cheap indexed lookup; it runs on the row-`creating` path for every id.
 
 ### 3. Custom repository implementations
 
@@ -217,44 +262,161 @@ $store->append($subscription, 'host.custom.thing', [
 
 Use the idempotency key when the operation can be retried by an outer system (queued job, HTTP retry).
 
+Reading the log back is part of the same public surface. The per-subscription relation is the sequence-ordered reader for replay; the `EventStore` adds paginated, newest-first readers for UI timelines that span many subscriptions:
+
+```php
+$subscription->events()->get();   // sequence-ordered — replay / audit
+
+Tashil::events()->historyFor($subscription, perPage: 20);          // one subscription
+Tashil::events()->historyForSubscriber($tenant, perPage: 20);      // every sub the subscriber held
+Tashil::events()->historyForPackage($plan,                         // plan-wide lifecycle timeline
+    perPage: 20,
+    with: ['subscription.subscriber'],
+    pageName: 'events',
+);
+```
+
+Each returns a `LengthAwarePaginator<SubscriptionEvent>` (occurred_at desc, sequence_num desc tie-break). All query building lives in `SubscriptionEventRepositoryInterface` (`paginateForSubscription / paginateForSubscriber / paginateForPackage`) — the service only maps the domain object to identifiers and returns the paginator, never a query builder. See [05-Reporting-Data-Model.md](05-Reporting-Data-Model.md).
+
 ## Integrating tahsil with the host's billing / payments
 
-The contract: tahsil owns subscription state and invoice issuance; the host owns money movement.
+The contract: tahsil owns subscription state, invoice issuance, and the activation/renewal/dunning state machine; the host owns money movement. The **full lifecycle** (activation, renewal, dunning, reactivation, proration, pause) is documented in [09-Billing-Lifecycle.md](09-Billing-Lifecycle.md); the renewal slice:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Tahsil                                                     │
-│  - Issues Invoice (status=pending)                          │
+│  - Issues Invoice (status=pending, kind=initial|renewal|…)  │
 │  - Fires InvoiceIssued                                      │
 ├─────────────────────────────────────────────────────────────┤
 │  Host listener                                              │
 │  - Charges card via Stripe/Paddle/…                         │
 │  - On success → $invoice->markAsPaid()                      │
 ├─────────────────────────────────────────────────────────────┤
-│  Tahsil InvoiceObserver                                     │
-│  - On status → Paid:                                        │
-│    - SubscriptionService::advancePeriod($sub)               │
-│    - Append subscription.renewed                            │
-│    - Dispatch SubscriptionRenewed + InvoicePaid             │
+│  Tahsil InvoiceObserver — routes by invoice.kind + status:  │
+│  - initial + Pending          → activate()  (first access)  │
+│  - renewal + Active/OnTrial    → advancePeriod() + renewed   │
+│  - lapsed (past_due/…)         → reactivate()                │
+│  - proration / initial-active  → no period change            │
+│  - always → InvoicePaid                                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-For dunning, gateway webhook reconciliation, refund execution, the host wires the equivalent listeners. Tahsil's job ends at issuing the bill and reflecting the host's `markAsPaid` decision.
+For the failed-payment retry *charge* and gateway webhook reconciliation / refund execution, the host wires listeners on `SubscriptionPastDue` / `InvoiceOverdue` / `SubscriptionSuspended`. Tahsil owns the dunning *state machine and schedule* (`tashil:process-dunning`); it issues the bill, escalates the lifecycle, and reflects the host's `markAsPaid` decision — it never charges.
 
 When recording transactions, pass the gateway-supplied id through (Stripe `ch_…`, Paddle `txn_…`, etc.). The `UNIQUE(gateway, transaction_id)` constraint on `tashil_transactions` makes duplicate webhook deliveries safe — a second insert with the same pair throws `UniqueConstraintViolationException`, which the host should treat as "already recorded, ignore." For non-gateway payments (cash, manual bank transfer), leave `transaction_id` empty and `TransactionObserver::creating` will stamp a `TXN-…` id from `tashil.transaction.generator`.
 
 ## Adding the trait to a model
 
 ```php
+use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Traits\HasSubscriptions;
 
-class User extends Authenticatable
+class User extends Authenticatable implements Subscribable
 {
     use HasSubscriptions;
 }
 ```
 
-That alone gives the model the full API documented in [examples/01-Subscription-Management.md](../examples/01-Subscription-Management.md) and [examples/02-Feature-Usage-Tracking.md](../examples/02-Feature-Usage-Tracking.md). Any Eloquent model can be a subscriber — `Team`, `Organization`, `Workspace`.
+The `implements Subscribable` is **required** — every library type-hint that takes a subscriber is `Subscribable`, not Eloquent's `Model`. The trait provides default implementations for all four interface methods (`subscriptions`, `resolveSubscription`, `getSubscriberKey`, `getSubscriberType`); you only need to override the ones you want to change.
+
+That gives the model the full API documented in [examples/01-Subscription-Management.md](../examples/01-Subscription-Management.md) and [examples/02-Feature-Usage-Tracking.md](../examples/02-Feature-Usage-Tracking.md). Any Eloquent model can be a subscriber — `Team`, `Organization`, `Workspace`.
+
+### Customising which subscription is "the active one"
+
+`HasSubscriptions::loadSubscription()` calls `resolveSubscription()` to decide which subscription to use for every feature / lifecycle / middleware check. Default = latest valid subscription. Override for multi-sub / tenant scenarios:
+
+```php
+class Team extends Model implements Subscribable
+{
+    use HasSubscriptions;
+
+    public function resolveSubscription(): ?Subscription
+    {
+        // Example: prefer the subscription tied to the team's current
+        // workspace rather than the most recently created one.
+        return $this->subscriptions()
+            ->valid()
+            ->where('package_id', $this->currentWorkspace->preferredPackageId())
+            ->first();
+    }
+}
+```
+
+### Resolving the subscribable for middleware / Blade directives
+
+Tahsil's middleware and helpers need to know which model represents "the current subscriber" — by default, the authenticated user. Override when it's a team, tenant, or any other model:
+
+```php
+// AppServiceProvider::boot
+use Foysal50x\Tashil\Facades\Tashil;
+
+Tashil::resolveSubscribableUsing(fn () => Team::current());
+```
+
+`Tashil::resolveSubscribable()` returns `null` when no resolver is registered and `auth()->user()` is unauthenticated, or when the resolved object doesn't implement `Subscribable`. The middleware treat both cases as "deny → 403".
+
+## Middleware
+
+Three route middleware ship with the package and auto-register on boot:
+
+| Alias | Class | Purpose |
+|---|---|---|
+| `subscribed` | `EnsureSubscribed` | Resolved subscribable has a currently valid subscription. |
+| `plan:{slug}` | `EnsurePlan` | Subscribed AND on the named package slug. |
+| `feature:{slug}` | `EnsureFeature` | Subscribed AND `UsageService::check` passes for the named feature. |
+
+```php
+Route::middleware('subscribed')->group(function () {
+    // any valid subscription
+});
+
+Route::middleware('plan:pro')->group(function () {
+    // Pro plan only
+});
+
+Route::middleware('feature:api-calls')->group(function () {
+    // requires the api-calls feature on the current snapshot
+});
+```
+
+All three abort with `403` on failure. Override aliases via `config('tashil.middleware.aliases')` when a name collides with an existing host alias.
+
+## Blade directives
+
+Four conditional directives are registered on boot. They go through the same `Tashil::resolveSubscribable()` resolver as the middleware, so a custom `resolveSubscribableUsing` callback affects views and routes uniformly.
+
+```blade
+@subscribed
+    {{-- valid subscription (Active / OnTrial / PendingCancellation in grace) --}}
+@endsubscribed
+
+@plan('pro')
+    {{-- subscribed AND on this package slug --}}
+@endplan
+
+@feature('api-calls')
+    {{-- UsageService::check passes for this feature on the current snapshot --}}
+@endfeature
+
+@onTrial
+    {{-- strict: status == OnTrial AND trial_ends_at in future --}}
+@endonTrial
+```
+
+All directives support `@else` and `@endX`. They degrade safely to `false` when no subscribable can be resolved (guest user, no override, or the resolved object doesn't implement `Subscribable`).
+
+## Metered billing
+
+`MeteredBilling` is the host-implemented bridge to the wallet / balance system that funds Metered features. Tashil's default binding is `NullMeteredBilling`, which throws on every call so misconfiguration fails loud.
+
+Two implementation patterns are supported with no flag to toggle between them — `UsageService::resolveMeteredBilling` checks each subscriber per consume:
+
+1. **Self-implementing model** — `class User implements Subscribable, MeteredBilling`. No container binding needed; the subscriber handles its own billing.
+2. **Standalone class** — bound via the service container. Suited to service-layered codebases or shared billing logic across subscriber types.
+
+Both patterns satisfy the same interface and trigger the same events. Hosts can mix them: one subscriber type self-implements, another delegates to the container binding — resolution is per-subscriber.
+
+See [02-Feature-System.md › Metered features](02-Feature-System.md#metered-features) for the full contract, both patterns side-by-side, and the idempotency requirements.
 
 ## Testing your integration
 

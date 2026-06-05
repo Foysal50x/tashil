@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Enums\FeatureType;
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
@@ -33,6 +35,7 @@ it('has type-checking helpers', function () {
     expect($this->feature->isLimit())->toBeTrue();
     expect($this->feature->isBoolean())->toBeFalse();
     expect($this->feature->isConsumable())->toBeFalse();
+    expect($this->feature->isMetered())->toBeFalse();
 
     $booleanFeature = Feature::create([
         'name' => 'Email Support',
@@ -48,6 +51,16 @@ it('has type-checking helpers', function () {
         'type' => 'consumable',
     ]);
     expect($consumable->isConsumable())->toBeTrue();
+
+    $metered = Feature::create([
+        'name' => 'AI Tokens',
+        'slug' => 'ai-tokens',
+        'type' => 'metered',
+    ]);
+    expect($metered->isMetered())->toBeTrue();
+    expect($metered->isLimit())->toBeFalse();
+    expect($metered->isBoolean())->toBeFalse();
+    expect($metered->isConsumable())->toBeFalse();
 });
 
 it('scopes to active features', function () {

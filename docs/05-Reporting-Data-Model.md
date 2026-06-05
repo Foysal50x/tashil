@@ -57,18 +57,24 @@ The event log + snapshot tables are the source of truth for "what happened?" que
 Append-only, monotonic per subscription. Every state transition produced by `SubscriptionService` and friends writes one row. Common event types:
 
 ```
-subscription.created
+subscription.created          (payload: status, requires_payment, with_trial, …)
+subscription.activated        (payload: invoice_id) — pending → active on first payment
 subscription.cancelled        (payload: immediate, reason)
 subscription.resumed
 subscription.expired
+subscription.past_due         (payload: invoice_id, attempt) — entered/advanced dunning
+subscription.suspended        — dunning retries exhausted, access cut
+subscription.reactivated      (payload: invoice_id) — recovered a lapse by payment
 subscription.switched         (payload: new_subscription_id, new_package_id, new_package_slug)
-subscription.paused / .unpaused
+subscription.plan_changed     (payload: old_package_id, new_package_id, proration_amount) — in-place upgrade
+subscription.paused           (payload: remaining_seconds) / .unpaused
 subscription.renewed          (payload: new_period_end)
 subscription.pending_change_scheduled / .pending_change_cancelled
 trial.ending                  (payload: days_remaining)
 trial.converted
 trial.expired
-usage.reset                   (payload: feature_id, previous_usage)
+usage.reset                   (payload: feature_id, previous_usage) — incl. lazy inline resets
+usage.metered_charged         (payload: feature_id, units, unit_price, amount, currency)
 ```
 
 Reading the log:
@@ -85,6 +91,20 @@ Or via the repository contract for batch / cross-subscription work:
 app(\Foysal50x\Tashil\Contracts\SubscriptionEventRepositoryInterface::class)
     ->listForSubscription($sub, 'subscription.switched', 100);
 ```
+
+**Cross-cutting history readers (`Tashil::events()`).** For UI timelines that span many subscriptions — a subscriber's full history, or every subscription on a plan — the `EventStore` exposes paginated readers. They return a newest-first `LengthAwarePaginator<SubscriptionEvent>` (occurred_at desc, sequence_num desc as tie-breaker); the host controls page size, page name, and eager-loaded relations via arguments. The log stays append-only — these are reads:
+
+```php
+Tashil::events()->historyFor($subscription, perPage: 20);                     // one subscription
+Tashil::events()->historyForSubscriber($tenant, perPage: 20);                 // every sub the subscriber held
+Tashil::events()->historyForPackage($plan,                                    // plan-wide lifecycle timeline
+    perPage: 20,
+    with: ['subscription.subscriber'],
+    pageName: 'events',
+);
+```
+
+The service only maps the domain object to its identifiers and delegates to `SubscriptionEventRepositoryInterface::paginateForSubscription / paginateForSubscriber / paginateForPackage` — all query building (including the subscription subquery) lives in the repository, and the paginator (data), never a query builder, crosses the service boundary. The per-subscription `$sub->events()` relation remains the sequence-ordered reader for replay.
 
 ### The feature snapshot (`tashil_subscription_features`)
 

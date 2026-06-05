@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Config;

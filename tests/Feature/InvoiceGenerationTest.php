@@ -1,8 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
+use Foysal50x\Tashil\Contracts\ShouldBeUnique;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Subscription;
 use Foysal50x\Tashil\Services\BillingService;
+use Foysal50x\Tashil\Services\Generators\InvoiceNumberGenerator;
 use Illuminate\Support\Facades\Config;
 
 it('auto generates invoice number on creation via observer', function () {
@@ -29,4 +33,15 @@ it('uses billing service to create invoice with generated number', function () {
 
     expect($invoice->invoice_number)->not->toBeNull()
         ->and($invoice->invoice_number)->toStartWith('BILLING-');
+});
+
+it('InvoiceNumberGenerator opts into uniqueness and reflects the taken numbers', function () {
+    $generator = app(InvoiceNumberGenerator::class);
+
+    expect($generator)->toBeInstanceOf(ShouldBeUnique::class)
+        ->and($generator->isUnique('INV-FREE'))->toBeTrue();
+
+    Invoice::factory()->create(['invoice_number' => 'INV-TAKEN']);
+
+    expect($generator->isUnique('INV-TAKEN'))->toBeFalse();
 });

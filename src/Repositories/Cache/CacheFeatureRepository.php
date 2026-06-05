@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Repositories\Cache;
 
 use Foysal50x\Tashil\Contracts\FeatureRepositoryInterface;
@@ -33,6 +35,9 @@ class CacheFeatureRepository extends BaseCacheRepository implements FeatureRepos
     public function updateOrCreate(array $attributes, array $values): Feature
     {
         $result = $this->repository->updateOrCreate($attributes, $values);
+        $this->forget("feature:{$result->id}");
+        $this->forget("feature:{$result->slug}");
+        $this->forget('features:all');
 
         return $result;
     }

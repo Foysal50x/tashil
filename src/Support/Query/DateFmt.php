@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Support\Query;
 
 use Illuminate\Contracts\Database\Query\Expression;

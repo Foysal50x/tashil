@@ -1,11 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Contracts;
 
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
 
 interface SubscriptionRepositoryInterface
 {
@@ -27,17 +28,25 @@ interface SubscriptionRepositoryInterface
     /**
      * Get the current valid subscription for a subscriber.
      */
-    public function findValidForSubscriber(Model $subscriber): ?Subscription;
+    public function findValidForSubscriber(Subscribable $subscriber): ?Subscription;
 
     /**
      * Check if a subscriber has a valid subscription to a given package (or slug).
      */
-    public function subscriberHasValidSubscription(Model $subscriber, Package|string|null $package = null): bool;
+    public function subscriberHasValidSubscription(Subscribable $subscriber, Package|string|null $package = null): bool;
+
+    /**
+     * Whether the subscriber already has a non-terminal subscription
+     * (active / on_trial / pending / past_due / pending_cancellation /
+     * paused / suspended). Used to prevent accidental duplicate
+     * subscriptions on subscribe().
+     */
+    public function hasLiveSubscription(Subscribable $subscriber): bool;
 
     /**
      * Find a cancelled-but-not-expired subscription for a subscriber.
      */
-    public function findCancelledResumable(Model $subscriber): ?Subscription;
+    public function findCancelledResumable(Subscribable $subscriber): ?Subscription;
 
     /**
      * Subscriptions whose current_period_end has elapsed and whose
@@ -71,6 +80,16 @@ interface SubscriptionRepositoryInterface
      * rows from a package's feature pivot.
      */
     public function syncFeatures(Subscription $subscription, Package $package): void;
+
+    /**
+     * In-place plan change on the SAME subscription: supersede the current
+     * feature snapshots, write new ones from $package, and reconcile the
+     * counters — carrying existing usage forward when $carryUsage is true
+     * (the cap + reset cadence are updated to the new plan; the usage value
+     * is kept). Counters for features the new plan drops are left in place
+     * (no current snapshot ⇒ gating denies) and never deleted.
+     */
+    public function resyncFeatures(Subscription $subscription, Package $package, bool $carryUsage = true): void;
 
     /**
      * Count active subscriptions (active + on_trial).

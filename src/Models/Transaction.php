@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Models;
 
 use Foysal50x\Tashil\Enums\TransactionStatus;
@@ -20,14 +22,10 @@ class Transaction extends BaseModel
         'metadata'        => 'array',
     ];
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
     }
-
-    // ── Helpers ──────────────────────────────────────────────────
 
     public function isSuccessful(): bool
     {

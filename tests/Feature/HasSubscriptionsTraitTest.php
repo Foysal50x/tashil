@@ -1,10 +1,18 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Models\Feature;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 
 beforeEach(function () {
+    // This suite exercises the HasSubscriptions trait surface, not the
+    // billing-activation model. Run in legacy (immediate-active) mode so the
+    // trait's subscribe() yields an active subscription directly; the strict
+    // activate-on-payment path has dedicated coverage in ActivationFlowTest.
+    config()->set('tashil.billing.activate_on_payment', false);
+
     $this->loadMigrationsFrom(__DIR__ . '/../Fixtures/create_users_table.php');
 
     $this->feature = Feature::create(['name' => 'API Requests', 'slug' => 'api-requests', 'type' => 'limit']);

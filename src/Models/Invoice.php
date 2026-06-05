@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Models;
 
 use Foysal50x\Tashil\Database\Factories\InvoiceFactory;
+use Foysal50x\Tashil\Enums\InvoiceKind;
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -22,15 +25,16 @@ class Invoice extends BaseModel
     protected $guarded = [];
 
     protected $casts = [
-        'status'    => InvoiceStatus::class,
-        'amount'    => 'decimal:2',
-        'issued_at' => 'datetime',
-        'due_date'  => 'datetime',
-        'paid_at'   => 'datetime',
-        'metadata'  => 'array',
+        'status'          => InvoiceStatus::class,
+        'kind'            => InvoiceKind::class,
+        'amount'          => 'decimal:2',
+        'attempts'        => 'integer',
+        'issued_at'       => 'datetime',
+        'due_date'        => 'datetime',
+        'paid_at'         => 'datetime',
+        'last_attempt_at' => 'datetime',
+        'metadata'        => 'array',
     ];
-
-    // ── Relationships ────────────────────────────────────────────
 
     public function subscription(): BelongsTo
     {
@@ -42,8 +46,6 @@ class Invoice extends BaseModel
         return $this->hasMany(Transaction::class);
     }
 
-    // ── Scopes ───────────────────────────────────────────────────
-
     public function scopePaid(Builder $query): Builder
     {
         return $query->where('status', InvoiceStatus::Paid);
@@ -54,11 +56,34 @@ class Invoice extends BaseModel
         return $query->where('status', InvoiceStatus::Pending);
     }
 
-    // ── Helpers ──────────────────────────────────────────────────
-
     public function isPaid(): bool
     {
         return $this->status === InvoiceStatus::Paid;
+    }
+
+    public function isInitial(): bool
+    {
+        return $this->kind === InvoiceKind::Initial;
+    }
+
+    public function isRenewal(): bool
+    {
+        return $this->kind === InvoiceKind::Renewal;
+    }
+
+    public function isProration(): bool
+    {
+        return $this->kind === InvoiceKind::Proration;
+    }
+
+    /**
+     * Pending and past its due date — the trigger for the dunning cycle.
+     */
+    public function isOverdue(): bool
+    {
+        return $this->status === InvoiceStatus::Pending
+            && $this->due_date !== null
+            && $this->due_date->isPast();
     }
 
     public function markAsPaid(): self

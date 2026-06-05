@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Repositories\Cache;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
@@ -37,6 +39,12 @@ class CacheInvoiceRepository extends BaseCacheRepository implements InvoiceRepos
     {
         // Don't cache multi-subscription queries (too complex key; rare operation)
         return $this->repository->findBySubscriptionIds($subscriptionIds);
+    }
+
+    public function dueForDunning(\DateTimeInterface $moment): Collection
+    {
+        // Scheduler scan — never cached, always hits the source.
+        return $this->repository->dueForDunning($moment);
     }
 
     public function pendingCount(): int

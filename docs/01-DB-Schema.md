@@ -168,6 +168,7 @@ Catalog of subscribable plans. Pricing, trial config, billing cadence.
 | `billing_period` | VARCHAR | `Period` enum: day, week, month, year, lifetime. |
 | `billing_interval` | INT | Multiplier (e.g. `month` × 3 = quarterly). |
 | `trial_days` | INT | Trial length; 0 disables. |
+| `requires_payment` | BOOL | When true (and price > 0), the plan subscribes as `pending` and gains access only when its initial invoice is paid; authoritative at runtime. Seeded at creation from `tashil.billing.activate_on_payment` (column default `true`) when not set explicitly. Set `false` for free / offline / enterprise-invoiced plans that activate immediately. |
 | `is_active`, `is_featured` | BOOL | |
 | `sort_order` | INT | |
 | `metadata` | JSON NULL | Host-app custom data. |
@@ -184,7 +185,7 @@ Catalog of feature definitions independent of any plan.
 | `id` | BIGINT PK | |
 | `slug` | VARCHAR UNIQUE | Stable identifier used in code. |
 | `name`, `description` | VARCHAR / TEXT NULL | |
-| `type` | VARCHAR | `FeatureType` enum: `boolean`, `limit`, `consumable`, `enum`. |
+| `type` | VARCHAR | `FeatureType` enum: `boolean`, `limit`, `consumable`, `enum`, `metered`. |
 | `reset_period` | VARCHAR | `ResetPeriod` enum: `never`, `daily`, `weekly`, `monthly`, `yearly`. Drives `tashil:reset-quotas`. |
 | `is_active` | BOOL | Catalog kill-switch — when false, `UsageService::check()` refuses access globally. |
 | `sort_order` | INT | |
@@ -199,7 +200,7 @@ Per-plan feature configuration.
 |---|---|---|
 | `package_id` | BIGINT FK | cascadeOnDelete |
 | `feature_id` | BIGINT FK | cascadeOnDelete |
-| `value` | VARCHAR NULL | Limit amount or config value. Numeric values are parsed by tahsil as the limit; the raw string is also stored on the snapshot for boolean / enum features. |
+| `value` | VARCHAR NULL | Limit amount or config value. Numeric values are parsed by tahsil as the limit; the raw string is also stored on the snapshot for boolean / enum features. For `metered` features this holds the **unit price** (decimal string), not a cap. |
 | `is_available` | BOOL | If false, the feature is not synced on subscribe. |
 | `sort_order` | INT | |
 
@@ -229,6 +230,10 @@ Current state of one subscription. Updated on every transition; the immutable hi
 | `cancellation_effective_at` | TIMESTAMP NULL | Moment at which cancellation actually revokes access. For immediate cancel this equals `now()`; for grace cancel it equals `ends_at`. |
 | `cancellation_reason` | VARCHAR NULL | |
 | `auto_renew` | BOOL | |
+| `activated_at` | TIMESTAMP NULL | When the subscription first transitioned `pending → active` (first payment / free activation). |
+| `dunning_attempts` | INT | Current dunning cycle attempt count (also reused as the `extend_grace` extension counter). Cleared on reactivation. |
+| `last_dunning_at` | TIMESTAMP NULL | Timestamp of the most recent dunning escalation. |
+| `suspended_at` | TIMESTAMP NULL | When dunning suspended the subscription; drives the `cancel_after_suspend_days` expiry. |
 | `last_event_seq` | BIGINT | Cursor for the per-subscription event store. |
 | `metadata` | JSON NULL | |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMP | Soft-deletes enabled. |
@@ -272,7 +277,7 @@ Current usage value per (subscription, feature). Every change is also written to
 | `subscription_id` | BIGINT FK | cascadeOnDelete |
 | `feature_id` | BIGINT FK | cascadeOnDelete |
 | `usage` | DECIMAL(20,4) | Current counter. Fractional supported (storage GB, AI compute hours). |
-| `limit_value` | DECIMAL(20,4) NULL | Cached limit (null = unlimited). Cached on the counter so the atomic `UPDATE … WHERE usage + amount <= limit_value` is single-row. |
+| `limit_value` | DECIMAL(20,4) NULL | Cached limit (null = unlimited). Populated only for `limit` features; `boolean` / `consumable` / `enum` / `metered` counters carry `NULL`. Cached on the counter so the atomic `UPDATE … WHERE usage + amount <= limit_value` is single-row. |
 | `reset_period` | VARCHAR | Used by the reset job. |
 | `period_start` | TIMESTAMP NULL | |
 | `period_end` | TIMESTAMP NULL | The reset job zeroes counters whose `period_end <= now()` and advances the window anchored to the previous `period_end` (no drift if cron runs late). |
@@ -317,23 +322,32 @@ Index: `(subscription_id, event_type, occurred_at)`.
 
 ### `tashil_invoices`
 
-Bills tahsil issues on subscribe (non-trial) and on renewal. Status is the only mutable column after the row is committed.
+Bills tahsil issues: an `initial` invoice when a priced plan is subscribed (or a trial converts), a `renewal` invoice at period end, and a `proration` invoice on an in-place upgrade. Free / `requires_payment = false` plans get no invoice. Status is the primary mutable column after commit; `attempts` / `last_attempt_at` are updated by the dunning job.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | BIGINT PK | |
 | `subscription_id` | BIGINT FK | cascadeOnDelete |
 | `invoice_number` | VARCHAR UNIQUE | Generated by `InvoiceObserver::creating` via `tashil.invoice.generator`. |
+| `kind` | VARCHAR | `InvoiceKind` enum: `initial`, `renewal`, `proration`, `usage`. Drives `InvoiceObserver` routing on payment. Defaults to `renewal`. |
 | `amount`, `currency` | DECIMAL(10,2) / CHAR(3) | |
 | `status` | VARCHAR | `InvoiceStatus` enum: `draft`, `pending`, `paid`, `void`, `refunded`. |
 | `period_start`, `period_end` | TIMESTAMP NULL | The billing window the invoice covers. |
 | `issued_at`, `due_date`, `paid_at` | TIMESTAMP | |
+| `attempts`, `last_attempt_at` | INT / TIMESTAMP NULL | Dunning bookkeeping for unpaid invoices past `due_date`. |
 | `notes` | TEXT NULL | |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMP | Soft-deletes enabled. |
 
-Index: `(subscription_id, status)`.
+Indexes: `(subscription_id, status)`, `(status, due_date)` (dunning scan).
 
-When status transitions to `Paid`, `InvoiceObserver::updated` advances `current_period_end` on the subscription, appends `subscription.renewed`, and fires `SubscriptionRenewed` + `InvoicePaid`.
+`InvoiceObserver::updated` routes a paid invoice by `kind` + subscription status:
+
+- `initial` + `Pending` → `activate()` (first access granted, period anchored to `paid_at`).
+- `renewal` + `Active`/`OnTrial` → `advancePeriod()`, appends `subscription.renewed`, fires `SubscriptionRenewed`.
+- any kind + `PastDue`/`Suspended`/`Expired` → `reactivate()` (recover a lapse).
+- `proration` (or `initial` on an already-active sub) → no period change.
+
+See [09-Billing-Lifecycle.md](09-Billing-Lifecycle.md) for the full state machine.
 
 ### `tashil_transactions`
 

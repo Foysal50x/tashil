@@ -72,10 +72,15 @@ Event::listen(TrialEnding::class, function ($event) {
 
 ## Converting
 
-Two ways:
+`SubscriptionService::convertTrial($sub)` sets `status = Active` and `trial_converted_at = now()`, then:
 
-1. **Explicit** — host calls `SubscriptionService::convertTrial($sub)`. Sets `status = Active`, `trial_converted_at = now()`, appends `trial.converted`, dispatches `TrialConverted`.
-2. **Invoice-paid** — host marks an invoice as paid during the trial. Tahsil's `InvoiceObserver` advances `current_period_end` and fires `SubscriptionRenewed`. The host can also call `convertTrial()` from a listener on `InvoicePaid` to set `trial_converted_at`. Tahsil does not automatically infer conversion from payment; the host owns that policy because conversion semantics vary (some products treat any payment as conversion; others require an explicit upgrade).
+- **Anchors the first paid period to the conversion moment** — `current_period_start = now`, `current_period_end = now + billing period`, `ends_at = current_period_end`, and the feature counters re-anchor with it. The customer is not handed the unconsumed remainder of the trial-subscribe period for free.
+- **Issues the first `initial` invoice** for priced plans (skipped for free / `requires_payment = false` plans). Paying that invoice records the payment without advancing the just-anchored period (`initial` invoices never advance).
+- Appends `trial.converted` and dispatches `TrialConverted` (+ `SubscriptionActivated`).
+
+Tahsil does not automatically infer conversion from payment; the host calls `convertTrial()` when it decides the trial converted (conversion semantics vary by product). The next renewal is billed one full period after conversion — not after the original subscribe — so there is no free period after a trial.
+
+> The renewal cron (`tashil:renew-subscriptions`) selects `Active` subscriptions only and never bills a subscription that is still `OnTrial`, even when its `trial_days` outlive the first billing window.
 
 ## Expiring
 

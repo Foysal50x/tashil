@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,8 +17,6 @@ class UsageLog extends BaseModel
         'amount'   => 'decimal:2',
         'metadata' => 'array',
     ];
-
-    // ── Relationships ────────────────────────────────────────────
 
     public function subscription(): BelongsTo
     {

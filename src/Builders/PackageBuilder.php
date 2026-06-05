@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Builders;
 
 use Foysal50x\Tashil\Contracts\PackageRepositoryInterface;
@@ -28,6 +30,11 @@ class PackageBuilder
 
     protected int $trialDays = 0;
 
+    // null = "caller didn't choose" → defer to the install-wide default seeded
+    // in Package::booted() from tashil.billing.activate_on_payment. Only a
+    // call to requiresPayment() pins an explicit value.
+    protected ?bool $requiresPayment = null;
+
     protected bool $isActive = true;
 
     protected bool $isFeatured = false;
@@ -50,8 +57,6 @@ class PackageBuilder
         $this->name = $slug;
         $this->currency = Config::get('tashil.currency', 'USD');
     }
-
-    // ── Fluent setters ──────────────────────────────────────────
 
     public function name(string $name): self
     {
@@ -126,6 +131,19 @@ class PackageBuilder
         return $this;
     }
 
+    /**
+     * Whether this plan requires the initial invoice to be paid before access
+     * begins. When not called, the package inherits the install-wide default
+     * (tashil.billing.activate_on_payment, seeded at creation). Set false for
+     * free/offline/enterprise plans that should activate immediately.
+     */
+    public function requiresPayment(bool $requires = true): self
+    {
+        $this->requiresPayment = $requires;
+
+        return $this;
+    }
+
     public function active(bool $active = true): self
     {
         $this->isActive = $active;
@@ -153,8 +171,6 @@ class PackageBuilder
 
         return $this;
     }
-
-    // ── Feature assignment ──────────────────────────────────────
 
     /**
      * Attach a single feature to this package.
@@ -207,8 +223,6 @@ class PackageBuilder
         return $this;
     }
 
-    // ── Terminal operations ──────────────────────────────────────
-
     /**
      * Create the package and attach features.
      */
@@ -238,10 +252,15 @@ class PackageBuilder
 
     /**
      * Get the package attributes array without persisting.
+     *
+     * requires_payment is included only when the caller pinned it via
+     * requiresPayment(). Left out otherwise so Package::booted() seeds it from
+     * the install-wide default on create, and so createOrUpdate() never
+     * clobbers an existing package's flag when the caller didn't set one.
      */
     public function toArray(): array
     {
-        return [
+        $attributes = [
             'slug'             => $this->slug,
             'name'             => $this->name,
             'description'      => $this->description,
@@ -256,9 +275,13 @@ class PackageBuilder
             'sort_order'       => $this->sortOrder,
             'metadata'         => $this->metadata,
         ];
-    }
 
-    // ── Internal ────────────────────────────────────────────────
+        if ($this->requiresPayment !== null) {
+            $attributes['requires_payment'] = $this->requiresPayment;
+        }
+
+        return $attributes;
+    }
 
     protected function attachFeatures(Package $package): void
     {

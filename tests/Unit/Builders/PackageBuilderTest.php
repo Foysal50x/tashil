@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Builders\PackageBuilder;
 use Foysal50x\Tashil\Enums\Period;
 use Foysal50x\Tashil\Models\Feature;
@@ -128,4 +130,54 @@ it('returns array representation', function () {
     expect($arr)->toHaveKeys(['slug', 'name', 'price', 'billing_period', 'billing_interval']);
     expect($arr['slug'])->toBe('pro');
     expect($arr['price'])->toBe(29.99);
+});
+
+it('inherits requires_payment from the install-wide default when not pinned', function () {
+    // The builder defers to Package::booted() (seeded from
+    // tashil.billing.activate_on_payment) instead of hardcoding a value, so a
+    // plan built under the off default activates immediately.
+    config()->set('tashil.billing.activate_on_payment', false);
+    expect((new PackageBuilder('legacy'))->price(30)->create()->requires_payment)->toBeFalse();
+
+    config()->set('tashil.billing.activate_on_payment', true);
+    expect((new PackageBuilder('gated'))->price(30)->create()->requires_payment)->toBeTrue();
+});
+
+it('pins requires_payment explicitly regardless of the install-wide default', function () {
+    // An explicit requiresPayment() overrides the default in either direction.
+    config()->set('tashil.billing.activate_on_payment', false);
+    expect((new PackageBuilder('forced-gate'))->price(30)->requiresPayment(true)->create()->requires_payment)->toBeTrue();
+
+    config()->set('tashil.billing.activate_on_payment', true);
+    expect((new PackageBuilder('forced-free'))->price(30)->requiresPayment(false)->create()->requires_payment)->toBeFalse();
+});
+
+it('omits requires_payment from toArray() unless pinned, so the model seed and updates are not clobbered', function () {
+    // Not pinned → key absent → Package::booted() seeds it / createOrUpdate
+    // leaves an existing row's flag untouched.
+    expect((new PackageBuilder('p'))->price(30)->toArray())->not->toHaveKey('requires_payment');
+
+    // Pinned → key present with the chosen value.
+    $arr = (new PackageBuilder('p'))->price(30)->requiresPayment(false)->toArray();
+    expect($arr)->toHaveKey('requires_payment');
+    expect($arr['requires_payment'])->toBeFalse();
+});
+
+it('createOrUpdate does not clobber an existing requires_payment when the caller did not pin one', function () {
+    // Deliberately gated plan exists.
+    $original = (new PackageBuilder('pro'))->price(30)->requiresPayment(true)->create();
+    expect($original->requires_payment)->toBeTrue();
+
+    // Flip the install-wide default AFTER the package was created. A later edit
+    // that only changes price must NOT pull the new default into the row and
+    // silently turn gating off. This guards against seeding the builder's
+    // requires_payment from config eagerly (e.g. in the constructor / toArray),
+    // which would emit the key on every createOrUpdate and clobber the flag.
+    config()->set('tashil.billing.activate_on_payment', false);
+
+    $updated = (new PackageBuilder('pro'))->price(40)->createOrUpdate();
+
+    expect($updated->id)->toBe($original->id);
+    expect($updated->price)->toBe('40.00');
+    expect($updated->requires_payment)->toBeTrue();
 });

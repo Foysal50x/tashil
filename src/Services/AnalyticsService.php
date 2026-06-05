@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Services;
 
 use Foysal50x\Tashil\Contracts\InvoiceRepositoryInterface;
@@ -15,8 +17,6 @@ class AnalyticsService
         protected InvoiceRepositoryInterface $invoiceRepo,
     ) {}
 
-    // ── Usage ───────────────────────────────────────────────────
-
     /**
      * Get total usage per day for a subscription and feature.
      *
@@ -26,8 +26,6 @@ class AnalyticsService
     {
         return $this->usageLogRepo->getDailyUsage($subscription->id, $featureId, $days);
     }
-
-    // ── Subscription Metrics ────────────────────────────────────
 
     /**
      * Total number of subscriptions (all statuses).
@@ -83,8 +81,6 @@ class AnalyticsService
         return $this->subscriptionRepo->newSubscriptionsPerPeriod($months);
     }
 
-    // ── Revenue & Billing Metrics ───────────────────────────────
-
     /**
      * Calculate MRR (Monthly Recurring Revenue).
      */
@@ -136,8 +132,6 @@ class AnalyticsService
         return $this->subscriptionRepo->revenueByPackage();
     }
 
-    // ── Invoice Metrics ─────────────────────────────────────────
-
     /**
      * Count of pending invoices.
      */
@@ -153,8 +147,6 @@ class AnalyticsService
     {
         return $this->invoiceRepo->overdueCount();
     }
-
-    // ── Churn ───────────────────────────────────────────────────
 
     /**
      * Churn rate for the last N days (percentage).
@@ -187,8 +179,6 @@ class AnalyticsService
     {
         return $this->subscriptionRepo->churnTrend($months, $windowDays);
     }
-
-    // ── Dashboard Summary ───────────────────────────────────────
 
     /**
      * All-in-one dashboard KPI summary.
@@ -239,8 +229,6 @@ class AnalyticsService
             'overdue_invoices'      => $invStats['overdue_count'],
         ];
     }
-
-    // ── Per-Package Analytics ───────────────────────────────────
 
     /**
      * Comprehensive analytics grouped by package.

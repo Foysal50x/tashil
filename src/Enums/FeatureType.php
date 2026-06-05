@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Enums;
 
 enum FeatureType: string
@@ -8,4 +10,5 @@ enum FeatureType: string
     case Limit = 'limit';
     case Consumable = 'consumable';
     case Enum = 'enum';
+    case Metered = 'metered';
 }

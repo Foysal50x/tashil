@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
 use Foysal50x\Tashil\Models\Invoice;
@@ -30,8 +32,6 @@ beforeEach(function () {
 
     $this->analytics = app(AnalyticsService::class);
 });
-
-// ── packageAnalytics() ──────────────────────────────────────────────
 
 it('returns per-package analytics for multiple packages', function () {
     // Create subscriptions for the monthly package
@@ -245,15 +245,16 @@ it('calculates trial conversion rate per package', function () {
     $user1 = createUser();
     $user2 = createUser();
 
-    // Trial that converted to active
+    // Trial that converted to active — recorded by trial_converted_at.
     Subscription::create([
-        'subscriber_type' => get_class($user1),
-        'subscriber_id'   => $user1->id,
-        'package_id'      => $this->monthlyPackage->id,
-        'status'          => SubscriptionStatus::Active,
-        'starts_at'       => now()->subMonth(),
-        'ends_at'         => now()->addMonth(),
-        'trial_ends_at'   => now()->subDays(7),
+        'subscriber_type'    => get_class($user1),
+        'subscriber_id'      => $user1->id,
+        'package_id'         => $this->monthlyPackage->id,
+        'status'             => SubscriptionStatus::Active,
+        'starts_at'          => now()->subMonth(),
+        'ends_at'            => now()->addMonth(),
+        'trial_ends_at'      => now()->subDays(7),
+        'trial_converted_at' => now()->subDays(7),
     ]);
 
     // Trial that is still on trial

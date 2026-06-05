@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Contracts;
 
 use Foysal50x\Tashil\Models\FeatureUsage;
@@ -32,9 +34,26 @@ interface FeatureUsageRepositoryInterface
     public function dueForReset(\DateTimeInterface $now): Collection;
 
     /**
+     * Stream due-for-reset rows in chunks of $chunkSize. The callback
+     * receives each chunk as a Collection. Used by the Resetter to
+     * batch many rows under one transaction without loading everything
+     * into memory.
+     *
+     * @param  callable(Collection<int, FeatureUsage>): void  $callback
+     */
+    public function chunkDueForReset(\DateTimeInterface $now, int $chunkSize, callable $callback): void;
+
+    /**
      * Set absolute usage (used for storage-style features).
      *
      * @return float the new usage value.
      */
     public function reportAbsolute(FeatureUsage $usage, float $amount): float;
+
+    /**
+     * Re-anchor every counter's reset window to start at $now. Used on
+     * activation so the first quota period aligns with the moment access
+     * actually begins (first payment) rather than the earlier subscribe time.
+     */
+    public function reanchorPeriods(Subscription $subscription, \DateTimeInterface $now): void;
 }

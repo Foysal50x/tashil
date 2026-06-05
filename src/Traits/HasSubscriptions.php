@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Traits;
 
 use Foysal50x\Tashil\Contracts\FeatureUsageRepositoryInterface;
@@ -13,11 +15,19 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 /**
- * Provides subscription functionality to any Eloquent model.
+ * Provides subscription functionality to any Eloquent model that
+ * implements the Subscribable contract.
  *
- * Usage:
- *   class User extends Authenticatable { use HasSubscriptions; }
- *   class Team extends Model           { use HasSubscriptions; }
+ *   class User extends Authenticatable implements Subscribable
+ *   {
+ *       use HasSubscriptions;
+ *   }
+ *
+ * Hosts override resolveSubscription() to change which subscription
+ * represents the active one (multi-sub scenarios, tenant scoping, etc.).
+ * Everything in this trait that reaches for "the subscription" goes
+ * through loadSubscription(), which calls resolveSubscription() once
+ * per request lifecycle and caches the result on the instance.
  */
 trait HasSubscriptions
 {
@@ -25,24 +35,56 @@ trait HasSubscriptions
 
     protected bool $subscriptionResolved = false;
 
-    // ── Relationships ────────────────────────────────────────────
-
     public function subscriptions(): MorphMany
     {
         return $this->morphMany(Subscription::class, 'subscriber');
     }
 
-    // ── Active subscription ─────────────────────────────────────
+    /**
+     * Subscribable: primary key used in subscription lookups.
+     */
+    public function getSubscriberKey(): int|string
+    {
+        return $this->getKey();
+    }
 
-    public function subscription(): ?Subscription
+    /**
+     * Subscribable: polymorphic morph type written to subscriptions.subscriber_type.
+     */
+    public function getSubscriberType(): string
+    {
+        return $this->getMorphClass();
+    }
+
+    /**
+     * Subscribable: default subscription resolver — the latest valid
+     * subscription. Override in your model for custom selection logic
+     * (e.g. preferring a specific package or tenant scope).
+     */
+    public function resolveSubscription(): ?Subscription
     {
         return $this->subscriptionRepo()->findValidForSubscriber($this);
     }
 
+    /**
+     * Direct DB lookup of the currently valid subscription. Skips the
+     * request-scoped cache — use loadSubscription() when you want
+     * memoization across multiple calls in the same request.
+     */
+    public function subscription(): ?Subscription
+    {
+        return $this->resolveSubscription();
+    }
+
+    /**
+     * Memoized accessor used by every feature/lifecycle helper below.
+     * The first call resolves via resolveSubscription(); subsequent
+     * calls return the cached instance until clearSubscriptionCache().
+     */
     public function loadSubscription(): ?Subscription
     {
         if (! $this->subscriptionResolved) {
-            $this->resolvedSubscription = $this->subscription();
+            $this->resolvedSubscription = $this->resolveSubscription();
             $this->subscriptionResolved = true;
         }
 
@@ -72,8 +114,6 @@ trait HasSubscriptions
         return $this->subscribedTo($slug);
     }
 
-    // ── Trial / state ───────────────────────────────────────────
-
     public function onTrial(): bool
     {
         return $this->loadSubscription()?->isOnTrial() ?? false;
@@ -93,8 +133,6 @@ trait HasSubscriptions
 
         return $sub->pendingPackage;
     }
-
-    // ── Subscribe / Cancel / Resume / Switch / Pause ────────────
 
     public function subscribe(Package $package, bool $withTrial = false): Subscription
     {
@@ -139,6 +177,23 @@ trait HasSubscriptions
         return app('tashil')->subscription()->switchPlan($subscription, $newPackage);
     }
 
+    /**
+     * Change the active subscription's plan in place — upgrades apply now
+     * (prorated by default), downgrades schedule at period end. Unlike
+     * switchPlan(), the same subscription row and its usage are kept.
+     */
+    public function changePlan(Package $newPackage, bool $prorate = true): ?Subscription
+    {
+        $subscription = $this->loadSubscription();
+        if (! $subscription) {
+            return null;
+        }
+
+        $this->clearSubscriptionCache();
+
+        return app('tashil')->subscription()->changePlan($subscription, $newPackage, $prorate);
+    }
+
     public function pauseSubscription(): ?Subscription
     {
         $subscription = $this->loadSubscription();
@@ -174,8 +229,6 @@ trait HasSubscriptions
 
         return app('tashil')->subscription()->scheduleDowngrade($subscription, $target);
     }
-
-    // ── Feature access ──────────────────────────────────────────
 
     public function hasFeature(string $featureSlug): bool
     {
@@ -238,14 +291,25 @@ trait HasSubscriptions
         return $this->usageLogRepo()->getDailyUsage($subscription->id, $usage->feature_id, $days);
     }
 
-    public function useFeature(string $featureSlug, float $amount = 1): bool
+    /**
+     * Consume a feature.
+     *
+     * $idempotencyKey: pass a stable, caller-supplied token (e.g. the
+     * request ID, a job UUID, or "{userId}:{actionId}") to dedupe
+     * app-level retries — the same key reaching MeteredBilling::charge
+     * twice will be treated by a well-behaved provider as the same
+     * operation. When null, Tashil generates a fresh UUID per call,
+     * which only protects against provider-internal retries within a
+     * single attempt.
+     */
+    public function useFeature(string $featureSlug, float $amount = 1, ?string $idempotencyKey = null): bool
     {
         $subscription = $this->loadSubscription();
         if (! $subscription) {
             return false;
         }
 
-        return app('tashil')->usage()->increment($subscription, $featureSlug, $amount);
+        return app('tashil')->usage()->increment($subscription, $featureSlug, $amount, $idempotencyKey);
     }
 
     public function reportStorage(string $featureSlug, float $amount): bool
@@ -258,8 +322,6 @@ trait HasSubscriptions
         return app('tashil')->usage()->reportStorage($subscription, $featureSlug, $amount);
     }
 
-    // ── Invoices ────────────────────────────────────────────────
-
     /**
      * All invoices across this subscriber's subscriptions.
      */
@@ -269,8 +331,6 @@ trait HasSubscriptions
             $this->subscriptions()->pluck('id')->toArray(),
         );
     }
-
-    // ── Repository resolvers ────────────────────────────────────
 
     protected function subscriptionRepo(): SubscriptionRepositoryInterface
     {

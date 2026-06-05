@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Foysal50x\Tashil\Repositories\Cache;
 
 use Foysal50x\Tashil\Contracts\PackageRepositoryInterface;
@@ -23,7 +25,7 @@ class CachePackageRepository extends BaseCacheRepository implements PackageRepos
     public function create(array $data): Package
     {
         $result = $this->repository->create($data);
-        $this->cacheManager->forget("package:slug:{$result->slug}");
+        $this->invalidatePackage($result);
 
         return $result;
     }
@@ -31,7 +33,7 @@ class CachePackageRepository extends BaseCacheRepository implements PackageRepos
     public function updateOrCreate(array $attributes, array $values): Package
     {
         $result = $this->repository->updateOrCreate($attributes, $values);
-        $this->forget("package:slug:{$result->slug}");
+        $this->invalidatePackage($result);
 
         return $result;
     }
@@ -39,9 +41,15 @@ class CachePackageRepository extends BaseCacheRepository implements PackageRepos
     public function syncFeatures(Package $package, array $syncData): void
     {
         $this->repository->syncFeatures($package, $syncData);
+        $this->invalidatePackage($package);
+    }
+
+    protected function invalidatePackage(Package $package): void
+    {
         $this->forget('packages:all');
         $this->forget('packages:active');
         $this->forget("package:{$package->id}");
         $this->forget("package:{$package->slug}");
+        $this->forget("package:slug:{$package->slug}");
     }
 }

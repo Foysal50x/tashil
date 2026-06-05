@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 use Foysal50x\Tashil\Managers\DatabaseManager;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
