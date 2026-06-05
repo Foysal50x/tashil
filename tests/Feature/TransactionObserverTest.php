@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Foysal50x\Tashil\Contracts\ShouldBeUnique;
 use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Transaction;
 use Foysal50x\Tashil\Services\Generators\TransactionIdGenerator;
@@ -73,4 +74,21 @@ it('TransactionIdGenerator honors a custom prefix and format from config', funct
     $id = app(TransactionIdGenerator::class)->generate();
 
     expect($id)->toMatch('/^PAY-\d{4}$/');
+});
+
+it('TransactionIdGenerator opts into uniqueness and reflects the taken ids', function () {
+    $generator = app(TransactionIdGenerator::class);
+
+    expect($generator)->toBeInstanceOf(ShouldBeUnique::class)
+        ->and($generator->isUnique('TXN-FREE'))->toBeTrue();
+
+    Transaction::create([
+        'invoice_id'     => $this->invoice->id,
+        'gateway'        => 'manual',
+        'transaction_id' => 'TXN-TAKEN',
+        'amount'         => 5.00,
+        'currency'       => 'USD',
+    ]);
+
+    expect($generator->isUnique('TXN-TAKEN'))->toBeFalse();
 });

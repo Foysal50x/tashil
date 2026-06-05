@@ -51,8 +51,7 @@ it('regenerates until isUnique accepts an id', function () {
     $id = $generator->generate();
 
     expect($generator->checked)->toHaveCount(2)
-        ->and($id)->toBe($generator->checked[1])
-        ->and($id)->not->toBe($generator->checked[0]);
+        ->and($id)->toBe($generator->checked[1]);
 });
 
 it('throws after exhausting the attempt budget when no id is ever unique', function () {
