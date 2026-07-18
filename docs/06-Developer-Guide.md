@@ -510,6 +510,8 @@ TASHIL_CACHE_ENABLED=true
 
 Disabling cache (`TASHIL_CACHE_ENABLED=false`) makes every repository read hit the DB. Useful for local development and for debugging stale-cache issues.
 
+Cached payloads are serializer-safe: `BaseCacheRepository::remember` dehydrates models, Eloquent collections, dates, and backed enums into plain arrays via `Support\Cache\ModelCacheCodec` before they reach the store, and rehydrates them on read. Hosts running `cache.serializable_classes = false` (strict `unserialize` with `allowed_classes` disabled) therefore work with the cache layer enabled — no `__PHP_Incomplete_Class` on cache hits.
+
 ## Where things are tested
 
 | What | Test file |

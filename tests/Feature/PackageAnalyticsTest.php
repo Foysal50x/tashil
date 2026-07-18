@@ -218,6 +218,52 @@ it('includes invoice counts per package', function () {
     expect($monthly['total_revenue'])->toBe(29.99);   // only paid invoice revenue
 });
 
+it('does not multiply subscriber counts or mrr by invoice rows', function () {
+    $userA = createUser();
+    $userB = createUser();
+
+    $subscriptionA = Subscription::create([
+        'subscriber_type' => get_class($userA),
+        'subscriber_id'   => $userA->id,
+        'package_id'      => $this->monthlyPackage->id,
+        'status'          => SubscriptionStatus::Active,
+        'starts_at'       => now(),
+        'ends_at'         => now()->addMonth(),
+    ]);
+
+    Subscription::create([
+        'subscriber_type' => get_class($userB),
+        'subscriber_id'   => $userB->id,
+        'package_id'      => $this->monthlyPackage->id,
+        'status'          => SubscriptionStatus::Active,
+        'starts_at'       => now(),
+        'ends_at'         => now()->addMonth(),
+    ]);
+
+    // Several paid invoices on one subscription must not inflate the aggregates.
+    foreach ([1, 2, 3] as $i) {
+        Invoice::create([
+            'subscription_id' => $subscriptionA->id,
+            'invoice_number'  => "INV-FAN-{$i}",
+            'amount'          => 29.99,
+            'currency'        => 'USD',
+            'status'          => InvoiceStatus::Paid,
+            'issued_at'       => now(),
+            'due_date'        => now()->addDays(30),
+            'paid_at'         => now(),
+        ]);
+    }
+
+    $result = $this->analytics->packageAnalytics();
+
+    $monthly = collect($result)->firstWhere('package_id', $this->monthlyPackage->id);
+    expect($monthly['total_subscribers'])->toBe(2);
+    expect($monthly['active_subscribers'])->toBe(2);
+    expect($monthly['mrr'])->toBe(59.98);
+    expect($monthly['average_mrr'])->toBe(29.99);
+    expect($monthly['total_revenue'])->toBe(89.97);
+});
+
 it('returns zero values for packages with no active subscribers', function () {
     $user = createUser();
     Subscription::create([

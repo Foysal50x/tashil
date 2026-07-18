@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Foysal50x\Tashil\Repositories\Cache;
 
 use Foysal50x\Tashil\Managers\CacheManager;
+use Foysal50x\Tashil\Support\Cache\ModelCacheCodec;
 
 abstract class BaseCacheRepository
 {
@@ -45,11 +46,18 @@ abstract class BaseCacheRepository
 
     protected function remember(string $key, callable $callback): mixed
     {
+        // Cached payloads must stay serializer-safe (no objects) so hosts
+        // running cache.serializable_classes = false don't get
+        // __PHP_Incomplete_Class back on cache hits.
+        $dehydrated = fn () => ModelCacheCodec::dehydrate($callback());
+
         if (method_exists($this->cacheManager->store(), 'tags')) {
-            return $this->cacheManager->tags($this->cacheTags)->remember($key, $this->cacheTtl, $callback);
+            $result = $this->cacheManager->tags($this->cacheTags)->remember($key, $this->cacheTtl, $dehydrated);
+        } else {
+            $result = $this->cacheManager->remember($key, $this->cacheTtl, $dehydrated);
         }
 
-        return $this->cacheManager->remember($key, $this->cacheTtl, $callback);
+        return ModelCacheCodec::hydrate($result);
     }
 
     protected function forget(string $key): bool
