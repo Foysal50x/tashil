@@ -44,6 +44,8 @@ Entry point: `Tashil::analytics()`. All methods read from `tashil_subscriptions`
 
 `dashboardSummary()` and `packageAnalytics()` consolidate the above into one or two batched queries using `CaseGroup` / `CountFilter` / `SumFilter`. Use these in admin views to avoid N+1.
 
+`analyticsByPackage()` aggregates `total_revenue` in a separate per-package query over paid invoices instead of joining invoices onto the subscription rows — a join would fan out every `COUNT` / `SUM` by the number of invoices each subscription has (regression test: `PackageAnalyticsTest` "does not multiply subscriber counts or mrr by invoice rows").
+
 ### Caching
 
 `AnalyticsService` resolves the repos through the cache decorator (`CacheSubscriptionRepository`, `CacheInvoiceRepository`). Aggregates are cached at the repo level with the default TTL. Writes that affect aggregates invalidate the relevant keys. Disable with `tashil.cache.enabled = false`.

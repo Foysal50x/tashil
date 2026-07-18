@@ -8,8 +8,10 @@ use Carbon\Carbon;
 use Foysal50x\Tashil\Contracts\Subscribable;
 use Foysal50x\Tashil\Contracts\SubscriptionRepositoryInterface;
 use Foysal50x\Tashil\Enums\FeatureType;
+use Foysal50x\Tashil\Enums\InvoiceStatus;
 use Foysal50x\Tashil\Enums\ResetPeriod;
 use Foysal50x\Tashil\Enums\SubscriptionStatus;
+use Foysal50x\Tashil\Models\Invoice;
 use Foysal50x\Tashil\Models\Package;
 use Foysal50x\Tashil\Models\Subscription;
 use Foysal50x\Tashil\Models\SubscriptionFeature;
@@ -609,11 +611,21 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
             new CaseRule(new Value(0), new Equal("{$packagesTable}.billing_period", new Value('lifetime'))),
         ], new Value(0));
 
-        $paid = new Value('paid');
+        // Revenue is aggregated separately: joining invoices onto the
+        // subscription rows fans out every COUNT/SUM by the number of
+        // invoices a subscription has.
+        $revenueByPackage = Invoice::query()
+            ->join($subscriptionsTable, "{$invoicesTable}.subscription_id", '=', "{$subscriptionsTable}.id")
+            ->where("{$invoicesTable}.status", InvoiceStatus::Paid->value)
+            ->groupBy("{$subscriptionsTable}.package_id")
+            ->select([
+                "{$subscriptionsTable}.package_id",
+                new Alias(new Sum("{$invoicesTable}.amount"), 'revenue'),
+            ])
+            ->pluck('revenue', 'package_id');
 
         $rows = Subscription::query()
             ->join($packagesTable, "{$subscriptionsTable}.package_id", '=', "{$packagesTable}.id")
-            ->leftJoin($invoicesTable, "{$invoicesTable}.subscription_id", '=', "{$subscriptionsTable}.id")
             ->select([
                 "{$packagesTable}.id as package_id",
                 "{$packagesTable}.name as package_name",
@@ -626,15 +638,11 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                     'converted_trials',
                 ),
                 new Alias(new Coalesce([new SumFilter($mrrCase, $activeFilter), new Value(0)]), 'mrr'),
-                new Alias(
-                    new Coalesce([new SumFilter("{$invoicesTable}.amount", new Equal("{$invoicesTable}.status", $paid)), new Value(0)]),
-                    'total_revenue',
-                ),
             ])
             ->groupBy("{$packagesTable}.id", "{$packagesTable}.name")
             ->get();
 
-        return $rows->map(function ($row) {
+        return $rows->map(function ($row) use ($revenueByPackage) {
             $active = (int) $row->active_subscribers;
             $mrr = round((float) $row->mrr, 2);
 
@@ -653,7 +661,7 @@ class EloquentSubscriptionRepository implements SubscriptionRepositoryInterface
                 'mrr'                   => $mrr,
                 'average_mrr'           => $active > 0 ? round($mrr / $active, 2) : 0.0,
                 'trial_conversion_rate' => $trialConversionRate,
-                'total_revenue'         => round((float) $row->total_revenue, 2),
+                'total_revenue'         => round((float) ($revenueByPackage[$row->package_id] ?? 0), 2),
             ];
         })->toArray();
     }
